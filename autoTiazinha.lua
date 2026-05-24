@@ -303,9 +303,9 @@ function createSection(idx, sectionName, sectionStart, sectionMeasures)
   end
   beatFound, position = calcTime(sectionStart-1, 5)
   if beatFound then
-    reaper.SetEditCurPos(calcTime(sectionStart-1, 5), false, false)
+    reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."5.wav",0)
-    reaper.SetEditCurPos(calcTime(sectionStart-1, 6), false, false)
+    reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."6.wav",0)
   end
   return sectionStart+measureCount
