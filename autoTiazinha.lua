@@ -187,9 +187,10 @@ function createSongStructure(structure, start, cuesTrack)
     idx = idx + 1
   end
   local songEndingTime = calcTime(currentSection)
+  local setCursorStart = 40042
   local stopPlayingCommand  = 40044
   local nextTabCommand = 40861
-  reaper.AddRegionOrMarker(0, false, songEndingTime, 0, "! " .. stopPlayingCommand .." " .. nextTabCommand, idx, 0)
+  reaper.AddRegionOrMarker(0, false, songEndingTime, 0, "! " .. stopPlayingCommand ..  " " .. setCursorStart .. " " .. nextTabCommand, idx, 0)
   return songEndingTime
 end
 
@@ -305,6 +306,7 @@ function createSection(idx, sectionName, sectionStart, sectionMeasures)
   if beatFound then
     reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."5.wav",0)
+    beatFound, position = calcTime(sectionStart-1, 61)
     reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."6.wav",0)
   end
