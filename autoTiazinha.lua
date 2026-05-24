@@ -1,4 +1,4 @@
-reaper.ShowConsoleMsg("")
+--reaper.ShowConsoleMsg("")
 
 ---------------INPUT FUNCTIONS-----------------------
 local function prompt_song_settings(currentSettings)
@@ -49,7 +49,7 @@ local function parse_song_structure(text)
   for part in text:gmatch("([^|]+)") do
     --local name, measures = part:match("^%s*(.-)%s*:%s*(%d+)%s*$")
     local name, measures = part:match("^%s*(.-)%s*:%s*(.-)%s*$")
-    reaper.ShowConsoleMsg("name: "..name.."\n\tmeasures: "..measures.."\n")
+    --reaper.ShowConsoleMsg("name: "..name.."\n\tmeasures: "..measures.."\n")
     if name and measures then
       table.insert(structure, {
         name = name,
@@ -115,7 +115,7 @@ function openTemplate(songName)
   end
   
   reaper.Main_OnCommand(40859, 0)--new project tab command
-  reaper.ShowConsoleMsg(reaper.GetToggleCommandState(40390).."\n")
+  --reaper.ShowConsoleMsg(reaper.GetToggleCommandState(40390).."\n")
   if reaper.GetToggleCommandState(40390)==0  then
     reaper.Main_OnCommand(40390, 0) --toggle smooth seek
   end
@@ -123,7 +123,7 @@ function openTemplate(songName)
   if autoCrossState == 1  then --toggle auto crossfade when editing
     reaper.Main_OnCommand(40041, 0) --toggle auto crossfade when editing
   end
-  reaper.ShowConsoleMsg(projectDir..songName..".RPP".."\n")
+  --reaper.ShowConsoleMsg(projectDir..songName..".RPP".."\n")
   reaper.Main_SaveProjectEx(0, projectDir..songName..".RPP", 8) --save new version
 end
 
@@ -162,11 +162,11 @@ end
 function calcTime(measure, beat)
   if beat ~= nil then
     measureBeatConcat = measure.."."..beat..".00"
-    local timeCheck = reaper.parse_timestr_pos(measureBeatConcat, 1)
+    local timeCheck = reaper.parse_timestr_pos(measureBeatConcat, 1) -- verify if there are that many beats in the measure
     if measureBeatConcat == reaper.format_timestr_pos(timeCheck, "", 1) then
-      return timeCheck
+      return true, timeCheck
     else
-      return false
+      return false, -1
     end
   else
     return reaper.parse_timestr_pos(measure..".1.00", 1)
@@ -186,7 +186,10 @@ function createSongStructure(structure, start, cuesTrack)
     currentSection = createSection(idx, section.name, currentSection, section.measures)
     idx = idx + 1
   end
-  songEndingTime = calcTime(currentSection)
+  local songEndingTime = calcTime(currentSection)
+  local stopPlayingCommand  = 40044
+  local nextTabCommand = 40861
+  reaper.AddRegionOrMarker(0, false, songEndingTime, 0, "! " .. stopPlayingCommand .." " .. nextTabCommand, idx, 0)
   return songEndingTime
 end
 
@@ -204,7 +207,6 @@ function parse_measures(measuresString)
       i = i + 1
 
     -- Number means full-measure count.
-    -- Supports multi-digit numbers like 12, 16, etc.
     elseif char:match("%d") then
       local numberText = measuresString:match("^%d+", i)
       local number = tonumber(numberText)
@@ -245,19 +247,23 @@ function createSection(idx, sectionName, sectionStart, sectionMeasures)
       measureCount = measureCount + value
     end
   end
-  local sectionEndTime = calcTime(sectionStart+measureCount)
+  local sectionEndTime = calcTime(sectionStart+measureCount) 
   reaper.AddRegionOrMarker(0, true, sectionStartTime, sectionEndTime, sectionName, idx, 0)
   
+
+  local scriptPath = ({reaper.get_action_context()})[2]
+  local scriptDir = scriptPath:match("^(.*)[/\\]")
+  local cueDir = scriptDir  .. "/media/" .. cueLang .. "/"
  
   --inserting cues
-  local cueDir = projectDir..cueLang.."/"
   if cueLang == "EN" then
     cueDir = cueDir.."English Female - "
   elseif cueLang == "PT" then
     cueDir = cueDir.."Portugese - "
   end
   
-  reaper.SetEditCurPos(calcTime(sectionStart-1, 1), false, false)
+  _, cuePos = calcTime(sectionStart-1, 1)
+  reaper.SetEditCurPos(cuePos, false, false)
   if sectionName == "Chorus" then
     reaper.InsertMedia(cueDir.."Chorus.wav",0)
   elseif sectionName == "Verse" then
@@ -280,17 +286,23 @@ function createSection(idx, sectionName, sectionStart, sectionMeasures)
     reaper.InsertMedia(cueDir.."Breakdown.wav",0)
   end
   
-  reaper.SetEditCurPos(calcTime(sectionStart-1, 2), false, false)
-  reaper.InsertMedia(cueDir.."2.wav",0)
-  if songTimeSigNum > 2 and calcTime(sectionStart-1, 3) then
-    reaper.SetEditCurPos(calcTime(sectionStart-1, 3), false, false)
+  beatFound, position = calcTime(sectionStart-1, 2)
+  if beatFound then 
+    reaper.SetEditCurPos(position, false, false)
+    reaper.InsertMedia(cueDir.."2.wav",0)
+  end
+  beatFound, position = calcTime(sectionStart-1, 3)
+  if beatFound then 
+    reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."3.wav",0)
   end
-  if songTimeSigNum > 3 and calcTime(sectionStart-1, 4) then
-    reaper.SetEditCurPos(calcTime(sectionStart-1, 4), false, false)
+  beatFound, position = calcTime(sectionStart-1, 4)
+  if beatFound then 
+    reaper.SetEditCurPos(position, false, false)
     reaper.InsertMedia(cueDir.."4.wav",0)
   end
-  if songTimeSigNum == 6 and calcTime(sectionStart-1, 5) then
+  beatFound, position = calcTime(sectionStart-1, 5)
+  if beatFound then
     reaper.SetEditCurPos(calcTime(sectionStart-1, 5), false, false)
     reaper.InsertMedia(cueDir.."5.wav",0)
     reaper.SetEditCurPos(calcTime(sectionStart-1, 6), false, false)
@@ -329,7 +341,7 @@ local cuesTrack = createTrack("Cues")
 
 local songEnding = createSongStructure(settings.songStructure, songStart, cuesTrack)
 
-insertClick(clickTrack, songEnding)
+insertClick(clickTrack, songEnding+1)
 
 reaper.GetSet_LoopTimeRange(true, true, 0, calcTime(songStart-2), false) -- set loop to stop two measures before songstart
 --problems can happen when you try to go to the first marker and it coincides with the end of the loop
@@ -337,10 +349,6 @@ reaper.GetSetRepeat(1)
 
 reaper.SetEditCurPos(0, true, false)
 
---[[CREATING A HALF MEASURE TEST
-reaper.SetTempoTimeSigMarker(0, -1, -1, 1, 0, settings.bpm, 2, 4, false)
-reaper.SetTempoTimeSigMarker(0, -1, -1, 2, 0, settings.bpm, 4, 4, false)
---]]
 reaper.UpdateTimeline()
 if autoCrossState ~= reaper.GetToggleCommandState(40041) then
   reaper.Main_OnCommand(40041, 0) --toggle auto crossfade to original when editing
