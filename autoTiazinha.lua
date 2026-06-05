@@ -102,16 +102,12 @@ end
 
 
 local function open_template(song_name)
-  -- check if the project has the same name as the song. 
-  -- recreate the project if it does and create a new project if it doesnt
   song_name = song_name:gsub('[<>:"/\\|?*]', "_")
   project_name = reaper.GetProjectName(0):gsub("%.RPP$", "")
   project_directory = reaper.GetProjectPath().."/"
   if song_name ~= project_name then
     reaper.Main_OnCommand(40859, 0) -- new project tab command
-    reaper.Main_SaveProjectEx(0, project_directory..song_name..".RPP", 8) -- save new version
-  else
-    reaper.Main_SaveProjectEx(0, reaper.GetProjectName(0), 8)
+    reaper.Main_SaveProjectEx(0, project_directory..song_name..".RPP", 8) -- save
   end
   if reaper.GetToggleCommandState(40390)==0  then
     reaper.Main_OnCommand(40390, 0) -- toggle smooth seek on
@@ -209,6 +205,11 @@ local function clear_previous_structure()
   local idx = reaper.GetNumRegionsOrMarkers(0)
   for i=0, idx do
     reaper.DeleteProjectMarkerByIndex(0, 0)
+  end
+  idx = reaper.CountTempoTimeSigMarkers(0)
+  for i=0, idx do
+    reaper.DeleteTempoTimeSigMarker(0, 0)
+    reaper.UpdateTimeline()
   end
 end
 
@@ -315,6 +316,7 @@ autoCrossState = reaper.GetToggleCommandState(40041)
 if autoCrossState == 1  then -- toggle auto crossfade when editing
   reaper.Main_OnCommand(40041, 0) -- toggle auto crossfade when editing
 end
+local song_start = 5
 
 local retval, loaded_settings = load_song_settings()
 local settings = prompt_song_settings(loaded_settings)
@@ -322,20 +324,19 @@ local settings = prompt_song_settings(loaded_settings)
 if not settings then -- this deals with cancels on the prompt
   return
 end
-settings.song_structure = parse_song_structure(settings.song_structure_text)
 
---set variables to be used in project
-local song_start = 5
+settings.song_structure = parse_song_structure(settings.song_structure_text)
 
 open_template(settings.song_name)
 save_song_settings(settings)
+
+clear_previous_structure()
 set_song_bpm_signature(settings)
 set_double_click(settings)
 
 local click_track = get_or_create_track("Click")
 local cues_track = get_or_create_track("Cues")
 
-clear_previous_structure()
 local song_ending = generate_song(settings, song_start, cues_track)
 
 insert_click(click_track, song_ending+1)
