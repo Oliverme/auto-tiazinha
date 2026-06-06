@@ -9,7 +9,9 @@ local function prompt_song_settings(CurrentSettings)
     "Time sig denominator",
     "Cue language",
     "Double click? true/false",
-    "Song structure"
+    "Song structure",
+    "Click Accent",
+    "Click Secondary"
   }, ",")
 
   local default_values = table.concat({
@@ -19,10 +21,12 @@ local function prompt_song_settings(CurrentSettings)
     tostring(CurrentSettings.time_signature_denominator or "4"),
     CurrentSettings.cue_lang or "EN",
     tostring(CurrentSettings.is_double_click or "false"),
-    CurrentSettings.song_structure_text or "Intro:4|Verse:8|Chorus:8|End:4"
+    CurrentSettings.song_structure_text or "Intro:4|Verse:8|Chorus:8|Ending:4",
+    CurrentSettings.click_accent or "",
+    CurrentSettings.click_beat or ""
   }, ",")
 
-  local ok, retvals = reaper.GetUserInputs(title, 7, captions..",extrawidth=1000", default_values)
+  local ok, retvals = reaper.GetUserInputs(title, 9, captions..",extrawidth=1000", default_values)
 
   if not ok then return nil end
 
@@ -37,7 +41,9 @@ local function prompt_song_settings(CurrentSettings)
     time_signature_denominator = tonumber(selected_values[4]),
     cue_lang = selected_values[5],
     is_double_click = selected_values[6] == "true", -- converting string to bool
-    song_structure_text = selected_values[7]
+    song_structure_text = selected_values[7],
+    click_accent = selected_values[8],
+    click_beat = selected_values[9]
   }
 end
 
@@ -70,6 +76,8 @@ local function save_song_settings(settings)
   reaper.SetProjExtState(0, EXTNAME, "cue_lang", settings.cue_lang)
   reaper.SetProjExtState(0, EXTNAME, "is_double_click", tostring(settings.is_double_click))
   reaper.SetProjExtState(0, EXTNAME, "song_structure_text", settings.song_structure_text)
+  reaper.SetProjExtState(0, EXTNAME, "click_accent", settings.click_accent)
+  reaper.SetProjExtState(0, EXTNAME, "click_beat", settings.click_beat)
 end
 
 -------------------------
@@ -92,10 +100,12 @@ local function load_song_settings()
       time_signature_denominator = tonumber(get_proj_ext_value("time_signature_denominator")),
       cue_lang = get_proj_ext_value("cue_lang"),
       is_double_click = get_proj_ext_value("is_double_click"),
-      song_structure_text = get_proj_ext_value("song_structure_text")
+      song_structure_text = get_proj_ext_value("song_structure_text"),
+      click_accent = get_proj_ext_value("click_accent"),
+      click_beat = get_proj_ext_value("click_beat")
     }
   else
-    return false, {nil, nil, nil, nil, nil, nil, nil}
+    return false, {nil, nil, nil, nil, nil, nil, nil, nil, nil}
   end
 end
 ---------------INPUT FUNCTIONS END-----------------------
@@ -114,12 +124,38 @@ local function open_template(song_name)
   end
 end
 
-local function insert_click(click, endTime)
-  reaper.GetSet_LoopTimeRange(true, false, 0, endTime, false)
+local function insert_click(click, click_accent, click_beat, end_time)
+  reaper.GetSet_LoopTimeRange(true, false, 0, end_time, false)
   reaper.SetOnlyTrackSelected(click)
 
   --insert click source command
   reaper.defer(reaper.Main_OnCommand(40013, 0))
+
+  media_item = reaper.GetTrackMediaItem(click, 0)
+  _, str = reaper.GetItemStateChunk(media_item, "", true)
+  _, _, capture_samples = str:find("(SAMPLES.-)\n")
+  local script_path = ({reaper.get_action_context()})[2]
+  local script_dir = script_path:match("^(.*)[/\\]")
+  local click_dir = script_dir  .. "/media/click/"
+  local click_accent_sample = ""
+  if click_accent == "" then
+    click_accent_sample = "\"\" "
+  else
+    click_accent_sample = "\"".. click_dir .. click_accent .. ".wav\" "
+  end
+  local click_beat_sample = ""
+  if click_beat == "" then
+    click_beat_sample = "\"\" "
+  else
+    click_beat_sample = "\"".. click_dir .. click_beat .. ".wav\" "
+  end
+  local set_sample_string = "SAMPLES " .. click_accent_sample .. click_beat_sample .. "\"\" \"\""
+
+  str = str:gsub(capture_samples, set_sample_string)
+  _, _, capture_volume = str:find("(VOL .-)\n")
+  volume_str = "VOL 0.5 0.354"
+  str = str:gsub(capture_volume, volume_str)
+  reaper.SetItemStateChunk(media_item, str, true)
 end
 
 local function set_double_click(settings)
@@ -339,7 +375,7 @@ local cues_track = get_or_create_track("Cues")
 
 local song_ending = generate_song(settings, song_start, cues_track)
 
-insert_click(click_track, song_ending+1)
+insert_click(click_track, settings.click_accent, settings.click_beat, song_ending+1)
 
 reaper.GetSet_LoopTimeRange(true, true, 0, calculate_position(song_start-2), false) -- set loop to stop two measures before songstart
 reaper.GetSetRepeat(1)
