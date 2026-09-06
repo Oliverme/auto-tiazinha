@@ -244,7 +244,7 @@ local function clear_previous_structure()
   end
   idx = reaper.CountTempoTimeSigMarkers(0)
   for i=0, idx do
-    reaper.DeleteTempoTimeSigMarker(0, 0)
+    reaper.DeleteTempoTimeSigMarker(0, idx - i)
     reaper.UpdateTimeline()
   end
 end
