@@ -129,7 +129,7 @@ local function insert_click(click, click_accent, click_beat, end_time)
   reaper.SetOnlyTrackSelected(click)
 
   --insert click source command
-  reaper.defer(reaper.Main_OnCommand(40013, 0))
+  reaper.Main_OnCommand(40013, 0)
 
   media_item = reaper.GetTrackMediaItem(click, 0)
   _, str = reaper.GetItemStateChunk(media_item, "", true)
@@ -191,7 +191,7 @@ end
 function clear_track(track)
   local item_count = reaper.CountTrackMediaItems(track)
   for i=item_count-1, 0, -1 do
-    media_item = reaper.GetMediaItem(0, i)
+    media_item = reaper.GetTrackMediaItem(track, i)
     reaper.DeleteTrackMediaItem(track, media_item)
   end
 end
@@ -349,6 +349,7 @@ local function clean_vars()
 end
 -- START OF SCRIPT
 autoCrossState = reaper.GetToggleCommandState(40041)
+reaper.atexit(clean_vars)
 if autoCrossState == 1  then -- toggle auto crossfade when editing
   reaper.Main_OnCommand(40041, 0) -- toggle auto crossfade when editing
 end
@@ -383,5 +384,4 @@ reaper.GetSetRepeat(1)
 reaper.SetEditCurPos(0, true, false)
 
 reaper.UpdateTimeline()
-reaper.atexit(clean_vars())
 reaper.Main_SaveProject(0, false) -- save once done
