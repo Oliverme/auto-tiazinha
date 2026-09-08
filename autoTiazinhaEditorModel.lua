@@ -14,11 +14,13 @@ function M.new(saved)
     draft.settings[k] = v
   end
   draft.settings.is_double_click = saved.is_double_click == true or saved.is_double_click == 'true'
-  local structure = saved.song_structure_text or 'Intro:4|Verse:8|Chorus:8|Ending:4'
-  for part in (structure .. '|'):gmatch('(.-)|') do
-    local name, measures = part:match('^%s*(.-)%s*:%s*(.-)%s*$')
-    if not name or name == '' then error('Cannot load song structure: ' .. part) end
-    M.add(draft, name, measures)
+  local structure = saved.song_structure_text
+  if structure and structure ~= '' then
+    for part in (structure .. '|'):gmatch('(.-)|') do
+      local name, measures = part:match('^%s*(.-)%s*:%s*(.-)%s*$')
+      if not name or name == '' then error('Cannot load song structure: ' .. part) end
+      M.add(draft, name, measures)
+    end
   end
   return draft
 end

@@ -15,8 +15,9 @@ remain available.
 
 ## Editing
 
-The editor opens the active project's stored settings, or the original default
-arrangement.
+The editor opens the active project's stored settings. A project without saved
+settings starts with an empty song strip. The dialog-based
+`autoTiazinhaCaller.lua` retains the original default arrangement.
 
 - The palette contains available unnumbered section cues; count recordings and
   names such as `Chorus 1` and `Verse 2` are excluded. Previously saved numbered

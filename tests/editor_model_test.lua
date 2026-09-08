@@ -1,11 +1,14 @@
 local root=arg[1] or '.'
 local M=dofile(root..'/autoTiazinhaEditorModel.lua')
 local function equal(actual,expected) assert(actual==expected,tostring(actual)..' ~= '..tostring(expected)) end
-local draft=M.new()
-equal(M.settings(draft).song_structure_text,'Intro:4|Verse:8|Chorus:8|Ending:4')
-equal(draft.settings.is_double_click,false)
+local empty=M.new()
+equal(M.settings(empty).song_structure_text,'')
+equal(#empty.sections,0)
+equal(empty.settings.is_double_click,false)
+assert(#M.validate(empty,function() return true end,root..'/media/')>0)
 equal(M.new({is_double_click='false'}).settings.is_double_click,false)
 equal(M.new({is_double_click='true'}).settings.is_double_click,true)
+local draft=M.new({song_structure_text='Intro:4|Verse:8|Chorus:8|Ending:4'})
 local id=draft.sections[1].id
 M.move(draft,id,5)
 equal(M.settings(draft).song_structure_text,'Verse:8|Chorus:8|Ending:4|Intro:4')

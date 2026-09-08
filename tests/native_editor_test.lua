@@ -1,6 +1,7 @@
 -- REAPER/gfx behavioral tests. No GUI extensions or native window required.
 local root=arg[1] or '.'
-local function harness()
+local function harness(saved)
+  saved=saved or {}
   local H={queue={},draws={},menus={},answers={},builds={},active='a',play=0,confirm=6,char=0,closed=false,dialogs={}}
   local g={w=1080,h=780,mouse_x=0,mouse_y=0,mouse_cap=0,mouse_wheel=0,mouse_hwheel=0,dest=-1,x=0,y=0}
   g.init=function(_,w,h) g.w,g.h=w,h; H.closed=false end
@@ -36,7 +37,7 @@ local function harness()
     atexit=function(fn) H.cleanup=fn end,
   }
   setmetatable(api,{__index=function(_,key) error('Unknown REAPER API '..key) end})
-  local builder={load_song_settings=function() return false,{} end,build=function(settings)
+  local builder={load_song_settings=function() return next(saved)~=nil,saved end,build=function(settings)
     H.builds[#H.builds+1]=settings
     if H.fail then error('Simulated failure') end
     return 100
@@ -78,7 +79,14 @@ local function harness()
   end
   H.gfx=g; H.frame(); return H
 end
-local settings_test=harness()
+local fallback={song_structure_text='Intro:4|Verse:8|Chorus:8|Ending:4'}
+local empty_test=harness()
+assert(empty_test.find('Click or drag a section above to start your song.',1))
+empty_test.click('Build / Update song',-1)
+assert(#empty_test.builds==0,'empty native editor allowed a build')
+empty_test.click('Intro',-1); empty_test.key(13)
+assert(empty_test.build()=='Intro:4')
+local settings_test=harness(fallback)
 settings_test.click('Song Name',-1); settings_test.type('My Song'); settings_test.key(13)
 settings_test.click('120',-1); settings_test.type('97.5'); settings_test.key(13)
 settings_test.click('+',-1); settings_test.click('-',-1)
@@ -102,7 +110,7 @@ settings_test.key(8); settings_test.type('o')
 settings_test.build(); assert(settings_test.builds[#settings_test.builds].song_name=='Canção')
 settings_test.click('Canção',-1); settings_test.type('Changed'); settings_test.key(27)
 settings_test.build(); assert(settings_test.builds[#settings_test.builds].song_name=='Canção')
-local zero_test=harness()
+local zero_test=harness(fallback)
 zero_test.click('4',1,2); zero_test.type('0'); zero_test.key(13)
 assert(zero_test.build()=='Intro:4|Verse:8|Chorus:8|Ending:0')
 zero_test.click('-',1,4)
@@ -113,7 +121,7 @@ local zero_builds=#zero_test.builds
 zero_test.click('Chorus',-1); zero_test.key(13)
 zero_test.click('Build / Update song',-1)
 assert(#zero_test.builds==zero_builds,'non-final zero length was accepted')
-local variant_test=harness()
+local variant_test=harness(fallback)
 variant_test.click('Chorus',1) -- cancel menu
 assert(variant_test.last_menu=='!Chorus|Chorus 1|Chorus 2|Chorus 10')
 variant_test.menus={3}; variant_test.click('Chorus',1)
@@ -133,7 +141,7 @@ variant_test.click('Build / Update song',-1); assert(#variant_test.builds==varia
 variant_test.menus={1}; variant_test.click('Chorus 2',1)
 assert(variant_test.last_menu=='Chorus')
 assert(variant_test.build()=='Chorus:8|Intro:4|Verse:8|Ending:4')
-local h=harness()
+local h=harness(fallback)
 -- One-bar increments support odd counts, and minus cannot go below one.
 h.click('+',1); assert(h.build():match('^Intro:5|'))
 h.click('-',1); assert(h.build():match('^Intro:4|'))
@@ -149,7 +157,7 @@ assert(h.build():match('^Intro:17|'))
 h.click('17',1); h.type('9')
 assert(h.build():match('^Intro:9|'))
 h.click('9',1); h.type('4'); h.key(13)
-h=harness()
+h=harness(fallback)
 assert(#h.builds==0,'opening modified the project')
 for _,d in ipairs(h.draws) do assert(d.value~='Chorus 1' and d.value~='Verse 2' and d.value~='2' and d.value~='Duplicate') end
 h.click('Chorus',-1); h.type('8'); h.key(13)
@@ -183,7 +191,7 @@ h.active='b'; h.frame(); h.click('Build / Update song',-1); assert(#h.builds==co
 h.active='a'; h.play=1; h.frame(); h.click('Build / Update song',-1); assert(#h.builds==count)
 h.play=0; h.fail=true; h.frame(); h.click('Build / Update song',-1); assert(#h.dialogs>0)
 -- Long songs support scrolling; narrow layouts retain an add menu.
-h=harness()
+h=harness(fallback)
 for _=1,8 do h.click('Chorus',-1); h.key(13) end
 h.gfx.mouse_x,h.gfx.mouse_y=500,h.strip.y+50
 h.gfx.mouse_wheel=12000; h.frame(); h.frame()
