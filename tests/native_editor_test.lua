@@ -74,7 +74,6 @@ local function harness(saved)
     for i=1,#value do H.key(value:byte(i)) end
   end
   function H.build()
-    H.click('Build / Update song',-1)
     return H.builds[#H.builds].song_structure_text
   end
   H.gfx=g; H.frame(); return H
@@ -82,9 +81,11 @@ end
 local fallback={song_structure_text='Intro:4|Verse:8|Chorus:8|Ending:4'}
 local empty_test=harness()
 assert(empty_test.find('Click or drag a section above to start your song.',1))
-empty_test.click('Build / Update song',-1)
+empty_test.click('Retry automatic build',-1)
 assert(#empty_test.builds==0,'empty native editor allowed a build')
-empty_test.click('Intro',-1); empty_test.key(13)
+empty_test.click('Intro',-1)
+assert(#empty_test.builds==0,'new section built before its length was provided')
+empty_test.type('4'); empty_test.key(13)
 assert(empty_test.build()=='Intro:4')
 local settings_test=harness(fallback)
 settings_test.click('Song Name',-1); settings_test.type('My Song'); settings_test.key(13)
@@ -107,6 +108,7 @@ assert(settings.time_signature_numerator==6 and settings.time_signature_denomina
 -- Unicode names, backspace and commit-on-build share the inline editing flow.
 settings_test.click('My Song',-1); settings_test.type('Can'); settings_test.key(231); settings_test.key(227); settings_test.type('o')
 settings_test.key(8); settings_test.type('o')
+settings_test.click('Retry automatic build',-1)
 settings_test.build(); assert(settings_test.builds[#settings_test.builds].song_name=='Canção')
 settings_test.click('Canção',-1); settings_test.type('Changed'); settings_test.key(27)
 settings_test.build(); assert(settings_test.builds[#settings_test.builds].song_name=='Canção')
@@ -119,7 +121,7 @@ zero_test.click('+',1,4); assert(zero_test.build():match('Ending:1$'))
 zero_test.click('-',1,4); assert(zero_test.build():match('Ending:0$'))
 local zero_builds=#zero_test.builds
 zero_test.click('Chorus',-1); zero_test.key(13)
-zero_test.click('Build / Update song',-1)
+zero_test.click('Retry automatic build',-1)
 assert(#zero_test.builds==zero_builds,'non-final zero length was accepted')
 local variant_test=harness(fallback)
 variant_test.click('Chorus',1) -- cancel menu
@@ -137,7 +139,7 @@ assert(variant_test.build()=='Chorus 2:8|Intro:4|Verse:8|Ending:4')
 -- Changing languages preserves a missing choice and blocks building until fixed.
 variant_test.menus={2}; variant_test.click('EN',-1)
 local variant_builds=#variant_test.builds
-variant_test.click('Build / Update song',-1); assert(#variant_test.builds==variant_builds)
+variant_test.click('Retry automatic build',-1); assert(#variant_test.builds==variant_builds)
 variant_test.menus={1}; variant_test.click('Chorus 2',1)
 assert(variant_test.last_menu=='Chorus')
 assert(variant_test.build()=='Chorus:8|Intro:4|Verse:8|Ending:4')
@@ -148,13 +150,14 @@ h.click('-',1); assert(h.build():match('^Intro:4|'))
 h.click('4',1); h.type('1'); h.key(13); h.click('-',1)
 assert(h.build():match('^Intro:1|'))
 h.click('1',1); h.type('0'); h.key(13)
-local previous=#h.builds; h.click('Build / Update song',-1)
+local previous=#h.builds; h.click('Retry automatic build',-1)
 assert(#h.builds==previous,'invalid edit allowed a build')
 h.key(27); assert(not h.closed)
 h.click('1',1); h.type('17'); h.key(13)
 assert(h.build():match('^Intro:17|'))
 -- Clicking Build commits an unfinished valid edit before dispatch.
 h.click('17',1); h.type('9')
+h.click('Retry automatic build',-1)
 assert(h.build():match('^Intro:9|'))
 h.click('9',1); h.type('4'); h.key(13)
 h=harness(fallback)
@@ -186,13 +189,26 @@ assert(h.build()=='Verse:2|Chorus:8|Ending:4|Chorus:8|Intro:4.')
 -- Invalid settings do not reach the draft/builder.
 h.click('120',-1); h.type('0'); h.key(13); h.key(27)
 assert(h.builds[#h.builds].bpm==120)
-local count=#h.builds
-h.active='b'; h.frame(); h.click('Build / Update song',-1); assert(#h.builds==count)
-h.active='a'; h.play=1; h.frame(); h.click('Build / Update song',-1); assert(#h.builds==count)
-h.play=0; h.fail=true; h.frame(); h.click('Build / Update song',-1); assert(#h.dialogs>0)
+-- Guarded changes are retained and build automatically when it is safe again.
+local guarded=harness(fallback)
+guarded.play=1; guarded.frame(); guarded.click('+',-1)
+assert(#guarded.builds==0,'change built during playback')
+guarded.play=0; guarded.frame()
+assert(#guarded.builds==1 and guarded.builds[1].bpm==121)
+guarded.active='b'; guarded.frame(); guarded.click('-',-1)
+assert(#guarded.builds==1,'change built in another project tab')
+guarded.active='a'; guarded.frame()
+assert(#guarded.builds==2 and guarded.builds[2].bpm==120)
+-- A failed automatic build does not loop; the retry control dispatches it again.
+local failed=harness(fallback)
+failed.fail=true; failed.click('+',-1)
+assert(#failed.builds==1 and #failed.dialogs==1)
+failed.frame(); assert(#failed.builds==1,'failed build retried without user action')
+failed.fail=false; failed.click('Retry automatic build',-1)
+assert(#failed.builds==2 and failed.builds[2].bpm==121)
 -- Long songs support scrolling; narrow layouts retain an add menu.
 h=harness(fallback)
-for _=1,8 do h.click('Chorus',-1); h.key(13) end
+for _=1,8 do h.click('Chorus',-1); h.type('4'); h.key(13) end
 h.gfx.mouse_x,h.gfx.mouse_y=500,h.strip.y+50
 h.gfx.mouse_wheel=12000; h.frame(); h.frame()
 assert(h.find('Intro',1))
@@ -200,6 +216,7 @@ h.gfx.w,h.gfx.h=620,800; h.frame()
 -- Four fixture sections still fit as buttons; all controls fit within height.
 for _,d in ipairs(h.draws) do if d.dest==-1 then assert(d.y<h.gfx.h,'control below window') end end
 -- Unapplied draft close can be canceled, including reopening a closed window.
+h.click('Song Name',-1); h.type('Pending name')
 h.char=-1; h.confirm=7; h.frame(); h.char=0; h.frame(); assert(not h.closed)
-h.char=27; h.confirm=6; h.frame(); assert(h.closed and #h.queue==0)
+h.char=-1; h.confirm=6; h.frame(); assert(h.closed and #h.queue==0)
 print('PASS: native editor — palette filtering, add, length, drag/reorder, removal, scrolling, build guards, error recovery, close handling.')

@@ -26,7 +26,8 @@ settings starts with an empty song strip. The dialog-based
   Bridge, Ending. **Other sections**
   are sorted alphabetically. Both groups use the selected language's available cues.
 - Click a palette section to append it, or drag it into the horizontal song
-  strip. New sections start at four bars with the count selected for editing.
+  strip. Enter the new section's length in the selected count field. The section
+  is not built until that value is committed; Escape cancels the addition.
 - Click a card title with a drawn chevron to select an available numbered cue
   (for example Chorus 2). The menu lists the unnumbered cue first, then variants
   numerically, and marks the current choice. Canceling leaves it unchanged.
@@ -64,27 +65,28 @@ settings starts with an empty song strip. The dialog-based
   `media/click/`. Select **Built-in** to use the default sound.
 - Smaller windows replace the palette with **Common sections +** and **Other sections +** menus.
   The horizontal order stays visible. Enlarge windows below 620 × 760 to edit.
-- **Build / Update song** applies and saves through the shared builder.
-  Project-tab and playback guards, draft-discard confirmation, and in-memory
-  draft limitations are described below.
+- Every committed UI change applies and saves through the shared builder.
+  Project-tab and playback guards, automatic retry behavior, and in-memory
+  pending-edit limitations are described below.
 
 Length notation matches the builder: `8` means eight bars; `4.` means four
 bars followed by a half bar; `4.2` means four bars, a half bar, then two bars.
 A half bar still occupies a numbered bar in the generated project. Half bars
 in odd-numerator meters are rejected.
 
-## Building and drafts
+## Automatic building and pending edits
 
-**Build / Update song** calls the shared builder and saves the result. It
-retains the builder's project creation, marker replacement, loop and cursor
-behavior. Editing cards alone does not modify the project. Stop playback before
-building. If you switch project tabs, switch back or use **Load project**,
-which asks before discarding unapplied edits.
+Committing a setting or section change calls the shared builder immediately and
+saves the result. It retains the builder's project creation, marker replacement,
+loop and cursor behavior. A newly added section stays pending until its length
+is committed, so adding it never causes an intermediate build. If playback is
+running or another project tab is active, the edit is retained and builds as
+soon as playback stops or the target project becomes active again. Use **Retry
+automatic build** after a build error.
 
-Drafts are held in memory until built. Closing with unapplied changes asks
+Pending edits are held in memory until built. Closing with unapplied changes asks
 whether to discard them. Forced script termination or quitting REAPER can still
-lose drafts. Automatic updates, draft persistence, and editor undo are not
-implemented.
+lose them. Pending-edit persistence and editor undo are not implemented.
 
 ## Zero-bar final section
 

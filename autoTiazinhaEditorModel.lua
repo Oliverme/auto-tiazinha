@@ -26,10 +26,22 @@ function M.new(saved)
 end
 
 function M.add(draft, name, measures, position)
-  local card = {id=draft.next_id, name=name, measures=measures or '4'}
+  -- A UI-created section is incomplete until its length is explicitly entered.
+  -- Loaded sections always pass their saved length here.
+  local card = {id=draft.next_id, name=name, measures=measures or ''}
   draft.next_id = draft.next_id + 1
   table.insert(draft.sections, position or #draft.sections+1, card)
   return card
+end
+
+function M.remove(draft, id)
+  for i,card in ipairs(draft.sections) do
+    if card.id == id then
+      table.remove(draft.sections, i)
+      return true
+    end
+  end
+  return false
 end
 
 -- destination is an insertion gap in the original list: 1 = before first,

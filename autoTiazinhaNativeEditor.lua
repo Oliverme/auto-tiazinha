@@ -3,7 +3,7 @@
 local dir=debug.getinfo(1,'S').source:sub(2):match('^(.*)[/\\]') or '.'
 local builder=dofile(dir..'/autoTiazinhaBuilder.lua')
 local Model=dofile(dir..'/autoTiazinhaEditorModel.lua')
-local draft,target,target_name,applied,status
+local draft,target,target_name,applied,attempted,status
 local palette,language={},nil
 local common_sections,other_sections={},{}
 local variants={}
@@ -40,8 +40,13 @@ local function load_project()
   if not ok then status=tostring(value); return false end
   draft=value; target=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target)
   scroll,language,cache=0,nil,{}
-  applied=snapshot(); status='Add sections, set their lengths, then build when ready.'
+  applied=snapshot(); attempted=applied; status='UI changes are built automatically.'
   return true
+end
+local build_song
+local function changed(message)
+  status=message
+  build_song()
 end
 local function refresh_palette()
   if language==draft.settings.cue_lang then return end
@@ -92,13 +97,13 @@ local function choose_variant(card)
   for i,name in ipairs(choices) do items[i]=(name==card.name and '!' or '')..name end
   gfx.x,gfx.y=gfx.mouse_x,gfx.mouse_y
   local selected=gfx.showmenu(table.concat(items,'|'))
-  if choices[selected] then
+  if choices[selected] and choices[selected]~=card.name then
     card.name=choices[selected]
-    status='Cue changed to '..card.name..'.'
+    changed('Cue changed to '..card.name..'.')
   end
 end
-local function begin_length_edit(card)
-  editing={card=card, id='length:'..card.id, value=card.measures, selected=true}
+local function begin_length_edit(card,is_new)
+  editing={card=card, id='length:'..card.id, value=card.measures, selected=true, is_new=is_new}
   status='Type a whole-bar count. Enter applies; Escape cancels.'
 end
 local function minimum_length(card)
@@ -109,6 +114,8 @@ local function commit_edit()
   local value=editing.value
   local number=tonumber(value)
   if editing.key then
+    local key=editing.key
+    local previous=draft.settings[key]
     if editing.key=='song_name' then
       if not value:match('%S') or value:find(',') then
         status='Enter a song name without commas.'; return false
@@ -118,19 +125,27 @@ local function commit_edit()
       if not number or number<=0 or number==math.huge then status='Tempo must be a positive number.'; return false end
       draft.settings.bpm=number
     end
-    editing=nil; status='Song settings updated.'; return true
+    editing=nil
+    if draft.settings[key]~=previous then changed('Song settings updated.') end
+    return true
   end
   if not value:match('^%d+$') or not number or number<minimum_length(editing.card) or number>=math.maxinteger then
     status='Enter whole bars (zero is allowed only for the final section), or Escape to cancel.'
     return false
   end
-  editing.card.measures=tostring(math.floor(number))
-  editing=nil; status='Length updated in the draft.'
+  local card=editing.card
+  local previous=card.measures
+  card.measures=tostring(math.floor(number))
+  editing=nil
+  if card.measures~=previous then changed('Section length updated.') end
   return true
 end
 local function edit_key(char)
   if not editing then return false end
-  if char==27 then editing=nil; status='Length edit canceled.'; return true end
+  if char==27 then
+    if editing.is_new then Model.remove(draft,editing.card.id) end
+    editing=nil; status='Edit canceled.'; return true
+  end
   if char==13 then commit_edit(); return true end
   if char==1 then editing.selected=true; return true end -- Ctrl+A
   if char==8 or char==127 then
@@ -157,29 +172,36 @@ local function custom_length(card)
   if bars==0 and minimum_length(card)>0 then status='Only the final section can have zero bars.'; return end
   if not bars then status='Use positive whole bars or dots, for example 8 or 4.'; return end
   if half and draft.settings.time_signature_numerator%2~=0 then status='Half bars require an even meter numerator in this builder.'; return end
-  card.measures=value; status='Custom length updated.'
+  if card.measures~=value then card.measures=value; changed('Custom length updated.') end
 end
 local function step_length(card,delta)
   -- Do not silently flatten a custom sequence such as 4.2.
   if not card.measures:match('^%d+$') then return end
   local value=tonumber(card.measures)
-  if value and value+delta>=minimum_length(card) and value+delta<math.maxinteger then card.measures=tostring(math.floor(value+delta)) end
+  if value and value+delta>=minimum_length(card) and value+delta<math.maxinteger then
+    card.measures=tostring(math.floor(value+delta))
+    changed('Section length updated.')
+  end
 end
 local function add_section(name,position)
-  local card=Model.add(draft,name,'4',position)
+  local card=Model.add(draft,name,nil,position)
   if not position then scroll=math.max(0,#draft.sections*(CARD+GAP)-GAP-strip.w) end
-  begin_length_edit(card)
+  begin_length_edit(card,true)
 end
-local function build_song()
+build_song=function(force)
+  local current=snapshot()
+  if current==applied then return end
+  if current==attempted and not force then return end
   if reaper.EnumProjects(-1,'')~=target then status='Switch back to '..target_name..' before building.'; return end
   if reaper.GetPlayState()~=0 then status='Stop playback before building.'; return end
   cache={}
   local errors=Model.validate(draft,exists,dir..'/media/')
   if #errors>0 then status=errors[1]; return end
+  attempted=current
   local ok,result=pcall(builder.build,Model.settings(draft))
   if ok then
     target=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target)
-    applied=snapshot(); status='Built and saved '..target_name..'.'
+    applied=current; attempted=current; status='Built and saved '..target_name..'.'
   else
     status='Build failed; the project may be partly updated.'
     reaper.ShowMessageBox(tostring(result),'AutoTiazinha build error',0)
@@ -227,9 +249,12 @@ local function select_setting(key,choices)
   gfx.x,gfx.y=gfx.mouse_x,gfx.mouse_y
   local choice=gfx.showmenu(table.concat(labels,'|'))
   if choices[choice]~=nil then
+    local previous=draft.settings[key]
+    local previous_double=draft.settings.is_double_click
     draft.settings[key]=choices[choice]
     if key=='time_signature_numerator' and choices[choice]~=4 then draft.settings.is_double_click=false end
-    cache={}; status='Song settings updated.'
+    cache={}
+    if draft.settings[key]~=previous or draft.settings.is_double_click~=previous_double then changed('Song settings updated.') end
   end
 end
 local function checkbox(label,x,y,w,checked,enabled,action)
@@ -255,14 +280,19 @@ local function settings_panel(width)
   text('RHYTHM & CLICK',36,164,C.muted,width-24)
   local tx=36
   setting_field('bpm','Tempo (BPM)',tx,185,76)
-  button('-',tx+80,207,30,30,function() s.bpm=math.max(1,s.bpm-1) end,true,'tempo-minus')
-  button('+',tx+114,207,30,30,function() s.bpm=s.bpm+1 end,true,'tempo-plus')
+  button('-',tx+80,207,30,30,function()
+    local value=math.max(1,s.bpm-1)
+    if value~=s.bpm then s.bpm=value; changed('Tempo updated.') end
+  end,true,'tempo-minus')
+  button('+',tx+114,207,30,30,function() s.bpm=s.bpm+1; changed('Tempo updated.') end,true,'tempo-plus')
   local mx=tx+160
   text('Time signature',mx,185,C.muted,124)
   button(tostring(s.time_signature_numerator),mx,207,48,30,function() select_setting('time_signature_numerator',{2,3,4,6}) end,true,'meter-numerator')
   text('/',mx+55,215,C.muted,12)
   button(tostring(s.time_signature_denominator),mx+73,207,48,30,function() select_setting('time_signature_denominator',{2,4,8,16}) end,true,'meter-denominator')
-  checkbox('Double click',mx+138,207,140,s.is_double_click,s.time_signature_numerator==4,function() s.is_double_click=not s.is_double_click end)
+  checkbox('Double click',mx+138,207,140,s.is_double_click,s.time_signature_numerator==4,function()
+    s.is_double_click=not s.is_double_click; changed('Click pattern updated.')
+  end)
   local sx=wide and mx+294 or 36
   local sy=wide and 185 or 247
   local sound_width=wide and (width-12-(sx-24)-12)/2 or (width-36)/2
@@ -331,7 +361,9 @@ local function draw_order(y,width)
       if choices then
         hit('variant:'..card.id,strip.x+x,strip.y+38,CARD,30,function() choose_variant(card) end,'card',card.id,strip)
       end
-      hit('remove:'..card.id,strip.x+x+CARD-30,strip.y+12,30,30,function() table.remove(draft.sections,i) end,nil,nil,strip)
+      hit('remove:'..card.id,strip.x+x+CARD-30,strip.y+12,30,30,function()
+        if Model.remove(draft,card.id) then changed('Section removed.') end
+      end,nil,nil,strip)
       hit('length:'..card.id,strip.x+x+42,strip.y+71,70,26,function() begin_length_edit(card) end,nil,nil,strip)
       if whole then
         hit('minus:'..card.id,strip.x+x+10,strip.y+71,28,26,function() step_length(card,-1) end,nil,nil,strip)
@@ -417,8 +449,9 @@ local function draw()
   local errors=Model.validate(draft,exists,dir..'/media/')
   local same=reaper.EnumProjects(-1,'')==target
   local stopped=reaper.GetPlayState()==0
-  button('Build / Update song',24,bottom+32,205,40,build_song,#errors==0 and same and stopped)
-  text(snapshot()~=applied and 'Unapplied changes' or 'No pending edits',245,bottom+45,C.muted,width-245)
+  local pending=snapshot()~=applied
+  button('Retry automatic build',24,bottom+32,205,40,function() build_song(true) end,pending and #errors==0 and same and stopped)
+  text(pending and 'Waiting to build' or 'Project is up to date',245,bottom+45,C.muted,width-245)
   local message=not same and ('Switch back to '..target_name..' or load the active project.') or not stopped and 'Stop playback before building.' or errors[1] or status
   text(message,24,bottom+86,(not same or not stopped or #errors>0) and C.warning or C.muted,width)
   if drag and drag.kind~='scrollbar' then
@@ -450,7 +483,8 @@ local function input(down)
     if drag then
       if drag.kind~='scrollbar' and inside(strip,gfx.mouse_x,gfx.mouse_y) then
         local destination=gap_at(gfx.mouse_x)
-        if drag.kind=='card' then Model.move(draft,drag.data,destination)
+        if drag.kind=='card' then
+          if Model.move(draft,drag.data,destination) then changed('Sections reordered.') end
         elseif drag.kind=='palette' then add_section(drag.data,destination) end
       end
     else
@@ -477,6 +511,9 @@ local function frame()
   if closing then gfx.quit(); return end
   local usable=draw()
   if usable then input((gfx.mouse_cap&1)==1) else pressed,drag,last_down=nil,nil,false end
+  -- Guarded changes build as soon as the user returns to the target project
+  -- and stops playback. Failed builds wait for the explicit retry button.
+  if usable and not editing and snapshot()~=applied and snapshot()~=attempted then build_song() end
   gfx.mouse_wheel,gfx.mouse_hwheel=0,0
   gfx.update(); reaper.defer(frame)
 end
