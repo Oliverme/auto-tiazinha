@@ -2,7 +2,7 @@
 local root=arg[1] or '.'
 local function harness(saved)
   saved=saved or {}
-  local H={queue={},draws={},menus={},answers={},builds={},active='a',play=0,confirm=6,char=0,closed=false,dialogs={}}
+  local H={queue={},draws={},menus={},answers={},builds={},build_play_states={},active='a',play=0,confirm=6,char=0,closed=false,dialogs={}}
   local g={w=1080,h=780,mouse_x=0,mouse_y=0,mouse_cap=0,mouse_wheel=0,mouse_hwheel=0,dest=-1,x=0,y=0}
   g.init=function(_,w,h) g.w,g.h=w,h; H.closed=false end
   g.setfont=function(_,_,_,flags) assert(flags==nil or type(flags)=='number') end
@@ -39,6 +39,7 @@ local function harness(saved)
   setmetatable(api,{__index=function(_,key) error('Unknown REAPER API '..key) end})
   local builder={load_song_settings=function() return next(saved)~=nil,saved end,build=function(settings)
     H.builds[#H.builds+1]=settings
+    H.build_play_states[#H.build_play_states+1]=H.play
     if H.fail then error('Simulated failure') end
     return 100
   end}
@@ -189,23 +190,29 @@ assert(h.build()=='Verse:2|Chorus:8|Ending:4|Chorus:8|Intro:4.')
 -- Invalid settings do not reach the draft/builder.
 h.click('120',-1); h.type('0'); h.key(13); h.key(27)
 assert(h.builds[#h.builds].bpm==120)
--- Guarded changes are retained and build automatically when it is safe again.
+-- Playback continues while the project is rebuilt.
 local guarded=harness(fallback)
 guarded.play=1; guarded.frame(); guarded.click('+',-1)
-assert(#guarded.builds==0,'change built during playback')
-guarded.play=0; guarded.frame()
 assert(#guarded.builds==1 and guarded.builds[1].bpm==121)
+assert(guarded.build_play_states[1]==1 and guarded.play==1,'build interrupted playback')
 guarded.active='b'; guarded.frame(); guarded.click('-',-1)
 assert(#guarded.builds==1,'change built in another project tab')
 guarded.active='a'; guarded.frame()
 assert(#guarded.builds==2 and guarded.builds[2].bpm==120)
+-- Recording is never interrupted; the pending change builds after it stops.
+local recording=harness(fallback)
+recording.play=5; recording.frame(); recording.click('+',-1)
+assert(#recording.builds==0,'change built during recording')
+recording.play=0; recording.frame()
+assert(#recording.builds==1 and recording.builds[1].bpm==121)
 -- A failed automatic build does not loop; the retry control dispatches it again.
 local failed=harness(fallback)
-failed.fail=true; failed.click('+',-1)
+failed.play=1; failed.fail=true; failed.click('+',-1)
 assert(#failed.builds==1 and #failed.dialogs==1)
+assert(failed.play==1,'failed build interrupted playback')
 failed.frame(); assert(#failed.builds==1,'failed build retried without user action')
 failed.fail=false; failed.click('Retry automatic build',-1)
-assert(#failed.builds==2 and failed.builds[2].bpm==121)
+assert(#failed.builds==2 and failed.builds[2].bpm==121 and failed.play==1)
 -- Long songs support scrolling; narrow layouts retain an add menu.
 h=harness(fallback)
 for _=1,8 do h.click('Chorus',-1); h.type('4'); h.key(13) end

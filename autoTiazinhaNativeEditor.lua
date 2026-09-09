@@ -193,7 +193,8 @@ build_song=function(force)
   if current==applied then return end
   if current==attempted and not force then return end
   if reaper.EnumProjects(-1,'')~=target then status='Switch back to '..target_name..' before building.'; return end
-  if reaper.GetPlayState()~=0 then status='Stop playback before building.'; return end
+  local play_state=reaper.GetPlayState()
+  if (play_state&4)~=0 then status='Stop recording before building.'; return end
   cache={}
   local errors=Model.validate(draft,exists,dir..'/media/')
   if #errors>0 then status=errors[1]; return end
@@ -448,12 +449,12 @@ local function draw()
   text(#draft.sections..' sections'..(bars and '  /  '..bars..' numbered bars' or ''),24,bottom,C.muted,width)
   local errors=Model.validate(draft,exists,dir..'/media/')
   local same=reaper.EnumProjects(-1,'')==target
-  local stopped=reaper.GetPlayState()==0
+  local recording=(reaper.GetPlayState()&4)~=0
   local pending=snapshot()~=applied
-  button('Retry automatic build',24,bottom+32,205,40,function() build_song(true) end,pending and #errors==0 and same and stopped)
+  button('Retry automatic build',24,bottom+32,205,40,function() build_song(true) end,pending and #errors==0 and same and not recording)
   text(pending and 'Waiting to build' or 'Project is up to date',245,bottom+45,C.muted,width-245)
-  local message=not same and ('Switch back to '..target_name..' or load the active project.') or not stopped and 'Stop playback before building.' or errors[1] or status
-  text(message,24,bottom+86,(not same or not stopped or #errors>0) and C.warning or C.muted,width)
+  local message=not same and ('Switch back to '..target_name..' or load the active project.') or recording and 'Stop recording before building.' or errors[1] or status
+  text(message,24,bottom+86,(not same or recording or #errors>0) and C.warning or C.muted,width)
   if drag and drag.kind~='scrollbar' then
     rect(gfx.mouse_x+12,gfx.mouse_y+16,160,30,C.hover)
     text(drag.kind=='palette' and drag.data or 'Move section',gfx.mouse_x+20,gfx.mouse_y+22,C.text,144)
@@ -512,7 +513,7 @@ local function frame()
   local usable=draw()
   if usable then input((gfx.mouse_cap&1)==1) else pressed,drag,last_down=nil,nil,false end
   -- Guarded changes build as soon as the user returns to the target project
-  -- and stops playback. Failed builds wait for the explicit retry button.
+  -- or stops recording. Failed builds wait for the explicit retry button.
   if usable and not editing and snapshot()~=applied and snapshot()~=attempted then build_song() end
   gfx.mouse_wheel,gfx.mouse_hwheel=0,0
   gfx.update(); reaper.defer(frame)

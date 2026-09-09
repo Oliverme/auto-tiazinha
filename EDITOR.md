@@ -66,7 +66,7 @@ settings starts with an empty song strip. The dialog-based
 - Smaller windows replace the palette with **Common sections +** and **Other sections +** menus.
   The horizontal order stays visible. Enlarge windows below 620 × 760 to edit.
 - Every committed UI change applies and saves through the shared builder.
-  Project-tab and playback guards, automatic retry behavior, and in-memory
+  Project-tab and recording guards, live rebuild behavior, and in-memory
   pending-edit limitations are described below.
 
 Length notation matches the builder: `8` means eight bars; `4.` means four
@@ -79,10 +79,11 @@ in odd-numerator meters are rejected.
 Committing a setting or section change calls the shared builder immediately and
 saves the result. It retains the builder's project creation, marker replacement,
 loop and cursor behavior. A newly added section stays pending until its length
-is committed, so adding it never causes an intermediate build. If playback is
-running or another project tab is active, the edit is retained and builds as
-soon as playback stops or the target project becomes active again. Use **Retry
-automatic build** after a build error.
+is committed, so adding it never causes an intermediate build. Active playback
+continues while the project is rebuilt; no play position is captured or restored.
+Recording is never interrupted: the edit is retained and builds once recording
+stops. If another project tab is active, the edit builds when the target project
+becomes active again. Use **Retry automatic build** after resolving a build error.
 
 Pending edits are held in memory until built. Closing with unapplied changes asks
 whether to discard them. Forced script termination or quitting REAPER can still
@@ -120,5 +121,6 @@ rendering or actual playback. For manual testing in a disposable REAPER project:
 3. Select numbered cues, change language, remove sections, and try invalid lengths.
 4. Build, inspect regions and cues, edit a length, then rebuild.
 5. Set the final section to zero and verify the end cue and tab switch with SWS marker actions enabled.
-6. Switch tabs or start playback and verify Build is disabled.
+6. Start playback and verify an edit rebuilds without stopping transport. Start
+   recording and verify edits wait until recording stops.
 7. Close with unapplied changes and test both keeping and discarding the draft.
