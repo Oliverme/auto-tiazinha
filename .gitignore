@@ -3,3 +3,6 @@
 *.autosave
 .DS_Store
 
+# Local development tools and results (not published)
+/tests/
+/benchmarks/

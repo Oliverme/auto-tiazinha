@@ -280,13 +280,15 @@ local function settings_panel(width)
   rect(24,155,width,wide and 94 or 156,C.panel)
   text('RHYTHM & CLICK',36,164,C.muted,width-24)
   local tx=36
-  setting_field('bpm','Tempo (BPM)',tx,185,76)
-  button('-',tx+80,207,30,30,function()
+  -- The label is rendered inside the same clipped width as the field.  Give
+  -- it enough room for the closing parenthesis before placing the steppers.
+  setting_field('bpm','Tempo (BPM)',tx,185,90)
+  button('-',tx+94,207,30,30,function()
     local value=math.max(1,s.bpm-1)
     if value~=s.bpm then s.bpm=value; changed('Tempo updated.') end
   end,true,'tempo-minus')
-  button('+',tx+114,207,30,30,function() s.bpm=s.bpm+1; changed('Tempo updated.') end,true,'tempo-plus')
-  local mx=tx+160
+  button('+',tx+128,207,30,30,function() s.bpm=s.bpm+1; changed('Tempo updated.') end,true,'tempo-plus')
+  local mx=tx+174
   text('Time signature',mx,185,C.muted,124)
   button(tostring(s.time_signature_numerator),mx,207,48,30,function() select_setting('time_signature_numerator',{2,3,4,6}) end,true,'meter-numerator')
   text('/',mx+55,215,C.muted,12)
@@ -400,7 +402,6 @@ local function draw()
   end
   local width=math.min(gfx.w-48,8100)
   text('AUTOTIAZINHA',24,22,C.accent,width,2)
-  text('Project: '..target_name,24,61,C.muted,width)
   button('Load project',gfx.w-178,22,154,36,request_load)
   local s=draft.settings
   local settings_bottom=settings_panel(width)
@@ -497,7 +498,7 @@ local function input(down)
   last_down=down
 end
 local function open_window()
-  gfx.init('AutoTiazinha — Native song editor',1080,960,0)
+  gfx.init('AutoTiazinha - Song Editor',1080,960,0)
   gfx.setfont(1,'Arial',15); gfx.setfont(2,'Arial',23,string.byte('b'))
 end
 local function frame()

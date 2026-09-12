@@ -132,22 +132,6 @@ Test this automation with disposable projects before using it live. Marker
 actions execute REAPER commands during playback, and the next-tab behavior
 depends on the order of the currently open project tabs.
 
-## Other entry points
-
-- `autoTiazinhaCaller.lua` opens REAPER's standard multi-field dialog and runs
-  the shared builder once. It is useful when a compact text-based workflow is
-  preferred.
-- `autoTiazinha.lua` is the original standalone implementation. It remains for
-  compatibility, but new users should normally use the Native Editor.
-
-The dialog song structure format is `Name:length`, separated by `|`, for example:
-
-```text
-Intro:4|Verse:8|Chorus:8|Ending:0
-```
-
-Song names cannot contain commas when using the dialog entry point.
-
 ## Troubleshooting
 
 - **No sections appear:** confirm that `media/EN/` and `media/PT/` are beside
@@ -161,19 +145,3 @@ Song names cannot contain commas when using the dialog entry point.
 - **A build error occurred:** playback may continue, but the project may be
   partially updated. Fix the reported input or missing media and choose
   **Retry automatic build**.
-
-More detailed Native Editor behavior is documented in [EDITOR.md](EDITOR.md).
-
-## Development and tests
-
-With Lua 5.4 installed, run from the repository root:
-
-```sh
-lua5.4 tests/editor_model_test.lua .
-lua5.4 tests/native_editor_test.lua .
-lua5.4 tests/builder_ending_test.lua .
-```
-
-These tests mock the REAPER and `gfx` APIs. They verify the editor model,
-automatic build interactions, and zero-bar ending behavior, but they do not
-replace manual testing inside REAPER.

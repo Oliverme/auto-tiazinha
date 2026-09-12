@@ -92,36 +92,128 @@ local function open_template(song_name)
   end
 end
 
-local function insert_click(click, click_accent, click_beat, end_time)
+local function has_click_line(chunk, key)
+  return chunk:find("[\r\n][ \t]*" .. key .. "[ \t]+[^\r\n]*") ~= nil
+      or chunk:find("^[ \t]*" .. key .. "[ \t]+[^\r\n]*") ~= nil
+end
+
+local function is_suitable_click_chunk(chunk)
+  -- A generated click item is a looping CLICK source with the source fields
+  -- needed for safe in-place updates. Reusing any other item would silently
+  -- turn it into a click item and could leave an item that cannot follow a
+  -- longer song.
+  if type(chunk) ~= "string" or chunk:find("<SOURCE[ \t]+CLICK") == nil then
+    return false
+  end
+  for _, key in ipairs({"LOOP", "BPM", "BPI", "VOL", "SAMPLES", "PATTERN", "PATTERNSTR", "MULT"}) do
+    if not has_click_line(chunk, key) then return false end
+  end
+  return true
+end
+
+local function inspect_click_item(click)
+  if reaper.CountTrackMediaItems(click) ~= 1 then return nil end
+
+  local media_item = reaper.GetTrackMediaItem(click, 0)
+  if not media_item then return nil end
+
+  local call_ok, chunk_ok, chunk = pcall(reaper.GetItemStateChunk, media_item, "", true)
+  if not call_ok or not chunk_ok or not is_suitable_click_chunk(chunk) then
+    return nil
+  end
+  return media_item, chunk
+end
+
+local function replace_click_line(chunk, key, value)
+  local pattern = "([ \t]*)" .. key .. "[ \t]+[^\r\n]*"
+  local replaced, count = chunk:gsub(pattern, function(indent)
+    return indent .. key .. " " .. value
+  end, 1)
+  if count ~= 1 then return nil end
+  return replaced
+end
+
+local function encode_click_pattern(pattern)
+  -- REAPER stores each click as a two-bit value. The values observed in its
+  -- project chunks are A=01 and B=10.
+  -- Building from the least-significant pair avoids depending on a bitwise
+  -- library that is not available in all Lua versions supported by REAPER.
+  local encoded = 1
+  local place = 4
+  for _ = 2, #pattern do
+    encoded = encoded + 2 * place
+    place = place * 4
+  end
+  return encoded
+end
+
+local function configure_click_item(media_item, chunk, settings, end_time)
+  local click_dir = script_dir .. "/media/click/"
+  local click_accent_sample = settings.click_accent == ""
+      and "\"\""
+      or "\"" .. click_dir .. settings.click_accent .. ".wav\""
+  local click_beat_sample = settings.click_beat == ""
+      and "\"\""
+      or "\"" .. click_dir .. settings.click_beat .. ".wav\""
+  local samples = click_accent_sample .. " " .. click_beat_sample .. " \"\" \"\""
+  local double_click = settings.is_double_click and settings.time_signature_numerator == 4
+  local pattern = double_click
+      and "ABBBBBBB"
+      or "A" .. string.rep("B", settings.time_signature_numerator - 1)
+  -- REAPER serializes a CLICK source in quarter-note units even when the
+  -- project denominator is not 4. Match the native source created by command
+  -- 40013: convert the project BPM to quarter-note BPM and keep BPI's
+  -- denominator at 4 (for example, 92 BPM in 6/8 becomes BPM 184, BPI 6 4).
+  local click_bpm = settings.bpm * settings.time_signature_denominator / 4
+
+  local updated_chunk = chunk
+  local replacements = {
+    {"BPM", tostring(click_bpm)},
+    {"BPI", tostring(settings.time_signature_numerator) .. " 4"},
+    {"VOL", "0.5 0.354"},
+    {"SAMPLES", samples},
+    {"PATTERN", "0 " .. tostring(encode_click_pattern(pattern))},
+    {"PATTERNSTR", pattern},
+    {"MULT", double_click and "2" or "1"}
+  }
+  for _, replacement in ipairs(replacements) do
+    updated_chunk = replace_click_line(updated_chunk, replacement[1], replacement[2])
+    if not updated_chunk then
+      return false
+    end
+  end
+
+  if updated_chunk ~= chunk then
+    reaper.SetItemStateChunk(media_item, updated_chunk, true)
+  end
+  -- Set these after the chunk so its serialized POSITION/LENGTH fields cannot
+  -- overwrite the geometry required by the current build.
+  reaper.SetMediaItemInfo_Value(media_item, "D_POSITION", 0)
+  reaper.SetMediaItemInfo_Value(media_item, "D_LENGTH", end_time)
+  reaper.UpdateItemInProject(media_item)
+  return true
+end
+
+local function insert_click(click, settings, end_time)
   reaper.GetSet_LoopTimeRange(true, false, 0, end_time, false)
   reaper.SetOnlyTrackSelected(click)
 
-  --insert click source command
-  reaper.Main_OnCommand(40013, 0)
-
-  local media_item = reaper.GetTrackMediaItem(click, 0)
-  local _, str = reaper.GetItemStateChunk(media_item, "", true)
-  local _, _, capture_samples = str:find("(SAMPLES.-)\n")
-  local click_dir = script_dir  .. "/media/click/"
-  local click_accent_sample = ""
-  if click_accent == "" then
-    click_accent_sample = "\"\" "
-  else
-    click_accent_sample = "\"".. click_dir .. click_accent .. ".wav\" "
+  local media_item, chunk = inspect_click_item(click)
+  if not media_item then
+    -- A missing, malformed, or duplicated item is not safe to update in place.
+    -- Rebuild it with REAPER's native command so its CLICK source semantics and
+    -- project import preferences stay identical to the original Builder.
+    clear_track(click)
+    reaper.Main_OnCommand(40013, 0)
+    media_item, chunk = inspect_click_item(click)
+    if not media_item then
+      error("REAPER did not create a suitable Click media item")
+    end
   end
-  local click_beat_sample = ""
-  if click_beat == "" then
-    click_beat_sample = "\"\" "
-  else
-    click_beat_sample = "\"".. click_dir .. click_beat .. ".wav\" "
-  end
-  local set_sample_string = "SAMPLES " .. click_accent_sample .. click_beat_sample .. "\"\" \"\""
 
-  str = str:gsub(capture_samples, set_sample_string)
-  local _, _, capture_volume = str:find("(VOL .-)\n")
-  local volume_str = "VOL 0.5 0.354"
-  str = str:gsub(capture_volume, volume_str)
-  reaper.SetItemStateChunk(media_item, str, true)
+  if not configure_click_item(media_item, chunk, settings, end_time) then
+    error("Click media item has an incomplete CLICK source")
+  end
 end
 
 local function set_double_click(settings)
@@ -133,7 +225,7 @@ local function set_double_click(settings)
   end
 end
 
-local function get_or_create_track(track_name)
+local function get_or_create_track(track_name, clear_existing_items)
   local track_count = reaper.CountTracks(0)
   for i=0, track_count-1 do
     local track = reaper.GetTrack(0, i)
@@ -141,7 +233,9 @@ local function get_or_create_track(track_name)
     if extension_value == EXTNAME then
       local _, p_name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
       if p_name == track_name then
-        clear_track(track)
+        if clear_existing_items then
+          clear_track(track)
+        end
         return track
       end
     end
@@ -165,23 +259,66 @@ local function set_song_bpm_signature(settings)
   reaper.SetTempoTimeSigMarker(0, -1, 0, -1, -1, settings.bpm, settings.time_signature_numerator, settings.time_signature_denominator, false)
 end
 
---function to calculate time positions since AddRegionOrMarker works based on time and not measure/beats
-local function calculate_position(measure, beat)
-  if beat then
-    local measure_beat = measure.."."..beat..".00"
-    local time = reaper.parse_timestr_pos(measure_beat, 1) -- verify if there are that many beats in the measure
-    if measure_beat == reaper.format_timestr_pos(time, "", 1) then
-      return true, time
-    else
-      return false, -1
-    end
-  else
-    return reaper.parse_timestr_pos(measure..".1.00", 1)
+-- Calculate positions without going through REAPER's formatted position strings.
+-- `TimeMap2_beatsToTime` accepts a zero-based measure count and a zero-based beat
+-- offset. The Builder's measure numbers are one-based, so the conversion is
+-- measure-1 / beat-1. TimeMap_GetMeasureInfo gives us both the measure start and
+-- its actual numerator, which preserves the old invalid-beat check for 4/4,
+-- 6/8, and partial measures.
+--
+-- REAPER's time map changes while partial sections are being installed. The
+-- cache is therefore invalidated after each time-signature marker is inserted;
+-- stable boundaries are shared for the rest of the build.
+local function new_position_calculator()
+  local measure_cache = {}
+  local beat_cache = {}
+
+  local function invalidate()
+    measure_cache = {}
+    beat_cache = {}
   end
+
+  local function measure_info(measure)
+    local cached = measure_cache[measure]
+    if cached then return cached end
+
+    local start_time, _, _, beats = reaper.TimeMap_GetMeasureInfo(0, measure - 1)
+    if type(start_time) ~= "number" or type(beats) ~= "number" then
+      error("REAPER could not resolve measure " .. tostring(measure))
+    end
+
+    cached = {start_time = start_time, beats = beats}
+    measure_cache[measure] = cached
+    return cached
+  end
+
+  local function calculate_position(measure, beat)
+    local info = measure_info(measure)
+    if not beat then
+      return info.start_time
+    end
+
+    local key = measure .. ":" .. beat
+    local cached = beat_cache[key]
+    if cached then return cached[1], cached[2] end
+
+    -- A direct conversion of an out-of-range beat would silently land at the
+    -- next measure. Reject it before conversion, matching the former
+    -- parse/format round-trip validation.
+    if beat < 1 or beat > info.beats then
+      cached = {false, -1}
+    else
+      cached = {true, reaper.TimeMap2_beatsToTime(0, beat - 1, measure - 1)}
+    end
+    beat_cache[key] = cached
+    return cached[1], cached[2]
+  end
+
+  return calculate_position, invalidate
 end
 
 -- looping through song structure and creating regions
-local function generate_song(settings, start, cues_track)
+local function generate_song(settings, start, cues_track, calculate_position, invalidate_positions)
   local idx = 1
   local next_section_start = start
   local structure = settings.song_structure
@@ -191,7 +328,7 @@ local function generate_song(settings, start, cues_track)
 
   reaper.SetOnlyTrackSelected(cues_track)
   for _, section in ipairs(structure) do
-    next_section_start = create_section(idx, section.name, next_section_start, section.measures, settings)
+    next_section_start = create_section(idx, section.name, next_section_start, section.measures, settings, calculate_position, invalidate_positions)
     idx = idx + 1
   end
   local song_ending_time = calculate_position(next_section_start)
@@ -204,13 +341,12 @@ end
 
 local function clear_previous_structure()
   local idx = reaper.GetNumRegionsOrMarkers(0)
-  for i=0, idx do
-    reaper.DeleteProjectMarkerByIndex(0, 0)
+  for i=idx-1, 0, -1 do
+    reaper.DeleteProjectMarkerByIndex(0, i)
   end
   idx = reaper.CountTempoTimeSigMarkers(0)
-  for i=0, idx do
-    reaper.DeleteTempoTimeSigMarker(0, idx - i)
-    reaper.UpdateTimeline()
+  for i=idx-1, 0, -1 do
+    reaper.DeleteTempoTimeSigMarker(0, i)
   end
 end
 
@@ -247,7 +383,7 @@ local function parse_measures(measures_string)
   return parsed
 end
 
-create_section = function(idx, section_name, section_start, section_measures, settings)
+create_section = function(idx, section_name, section_start, section_measures, settings, calculate_position, invalidate_positions)
   local section_start_time = calculate_position(section_start)
   local measure_count = 0
   local parsedMeasureTable = {}
@@ -263,8 +399,10 @@ create_section = function(idx, section_name, section_start, section_measures, se
     if value == 0.5 then
       --do half measure stuff
       reaper.SetTempoTimeSigMarker(0, -1, -1, section_start+measure_count-1, (settings.time_signature_numerator/2)-1, settings.bpm, settings.time_signature_numerator/2, settings.time_signature_denominator, false)
+      invalidate_positions()
       measure_count = measure_count + 1
       reaper.SetTempoTimeSigMarker(0, -1, -1, section_start+measure_count-1, 0, settings.bpm, settings.time_signature_numerator, settings.time_signature_denominator, false)
+      invalidate_positions()
     else
       measure_count = measure_count + value
     end
@@ -313,6 +451,22 @@ builder.load_song_settings = load_song_settings
 
 function builder.build(settings)
   local autoCrossState = reaper.GetToggleCommandState(40041)
+  local ui_refresh_prevented = false
+
+  local function prevent_ui_refresh()
+    reaper.PreventUIRefresh(1)
+    ui_refresh_prevented = true
+  end
+
+  local function allow_ui_refresh()
+    if ui_refresh_prevented then
+      -- Mark the guard inactive before calling into REAPER so a release
+      -- failure is not retried and cannot mask the build's original error.
+      ui_refresh_prevented = false
+      reaper.PreventUIRefresh(-1)
+    end
+  end
+
   local function restore_crossfade()
     if autoCrossState ~= reaper.GetToggleCommandState(40041) then
       reaper.Main_OnCommand(40041, 0)
@@ -331,29 +485,42 @@ function builder.build(settings)
     open_template(settings.song_name)
     save_song_settings(settings)
 
+    prevent_ui_refresh()
+
     clear_previous_structure()
     set_song_bpm_signature(settings)
     set_double_click(settings)
 
-    local click_track = get_or_create_track("Click")
-    local cues_track = get_or_create_track("Cues")
+    -- Keep the Click item available for in-place regeneration. Cues are still
+    -- intentionally cleared because their topology follows the song sections.
+    local click_track = get_or_create_track("Click", false)
+    local cues_track = get_or_create_track("Cues", true)
 
-    local song_ending = generate_song(settings, song_start, cues_track)
+    -- The map is ready after the base tempo/signature has been installed.
+    -- Keep one calculator for the complete build so section and cue boundaries
+    -- are shared, while create_section invalidates it when a partial-measure
+    -- signature changes the map.
+    local calculate_position, invalidate_positions = new_position_calculator()
+    local song_ending = generate_song(settings, song_start, cues_track, calculate_position, invalidate_positions)
 
-    insert_click(click_track, settings.click_accent, settings.click_beat, song_ending+1)
+    insert_click(click_track, settings, song_ending+1)
 
     reaper.GetSet_LoopTimeRange(true, true, 0, calculate_position(song_start-2), false) -- set loop to stop two measures before songstart
     reaper.GetSetRepeat(1)
 
     reaper.SetEditCurPos(0, true, false)
 
+    allow_ui_refresh()
     reaper.UpdateTimeline()
     reaper.Main_SaveProject(0, false) -- save once done
     return song_ending
   end, debug.traceback)
 
-  restore_crossfade()
+  local ui_refresh_ok, ui_refresh_error = xpcall(allow_ui_refresh, debug.traceback)
+  local crossfade_ok, crossfade_error = xpcall(restore_crossfade, debug.traceback)
   if not ok then error(result, 0) end
+  if not ui_refresh_ok then error(ui_refresh_error, 0) end
+  if not crossfade_ok then error(crossfade_error, 0) end
   return result
 end
 
