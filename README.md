@@ -10,9 +10,9 @@ rebuilds the project automatically as settings are changed.
 
 ## Requirements
 
-- [REAPER 7.79](https://www.reaper.fm/download.php) or newer is recommended.
-  The scripts may work on earlier REAPER releases, but those versions are not
-  part of the documented setup.
+- [REAPER 7.72](https://www.reaper.fm/download.php) or newer is required.
+  The scripts use `reaper.AddRegionOrMarker()`, which was introduced in REAPER
+  7.72.
 - [SWS/S&M Extension 2.14.0 #7](https://www.sws-extension.org/) or newer is
   required only for the end-of-song marker automation that stops playback,
   returns to the beginning, and selects the next project tab. Song generation
