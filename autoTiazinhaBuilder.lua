@@ -11,6 +11,24 @@ local script_path = debug.getinfo(1, "S").source:sub(2)
 local script_dir = script_path:match("^(.*)[/\\]") or "."
 local clear_track, create_section
 
+-- Keep region colors aligned with the editor palette. Numbered cues inherit
+-- their base section's color, and every uncategorized section uses one slate.
+local SECTION_COLORS = {
+  Intro = {41, 79, 125},
+  Verse = {133, 56, 46},
+  ["Pre Chorus"] = {26, 99, 92},
+  Chorus = {133, 92, 20},
+  Bridge = {92, 59, 125},
+  Ending = {56, 61, 71},
+}
+local OTHER_SECTION_COLOR = {64, 79, 97}
+
+local function section_region_color(name)
+  local base = name:match("^(.-)%s+%d+$") or name
+  local rgb = SECTION_COLORS[base] or OTHER_SECTION_COLOR
+  return reaper.ColorToNative(rgb[1], rgb[2], rgb[3]) | 0x1000000
+end
+
 local function parse_song_structure(text)
   local structure = {}
 
@@ -411,7 +429,7 @@ create_section = function(idx, section_name, section_start, section_measures, se
   -- A zero-bar final section is a cue only. The end action marker below
   -- generation lands at its start; do not create an empty region.
   if measure_count>0 then
-    reaper.AddRegionOrMarker(0, true, section_start_time, section_end_time, section_name, idx, 0)
+    reaper.AddRegionOrMarker(0, true, section_start_time, section_end_time, section_name, idx, section_region_color(section_name))
   end
 
   local cue_dir = script_dir  .. "/media/" .. cue_lang .. "/"

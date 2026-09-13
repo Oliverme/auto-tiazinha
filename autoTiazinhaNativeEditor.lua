@@ -15,6 +15,24 @@ local closing=false
 local editing=nil
 local CARD,GAP=154,12
 local C={bg={0.075,0.09,0.115},panel={0.11,0.13,0.165},button={0.16,0.19,0.23},hover={0.22,0.27,0.32},text={0.91,0.93,0.95},muted={0.57,0.63,0.69},accent={0.37,0.79,0.68},warning={0.94,0.70,0.37}}
+-- Ending stays close to the original neutral color but is lifted enough to
+-- remain visible as a stripe on the neutral Song Order cards.
+local SECTION_COLORS={
+  Intro={0.16,0.31,0.49},
+  Verse={0.52,0.22,0.18},
+  ['Pre Chorus']={0.10,0.39,0.36},
+  Chorus={0.52,0.36,0.08},
+  Bridge={0.36,0.23,0.49},
+  Ending={0.22,0.24,0.28},
+}
+local OTHER_SECTION_COLOR={0.25,0.31,0.38}
+local function section_color(name)
+  local base=name:match('^(.-)%s+%d+$') or name
+  return SECTION_COLORS[base] or OTHER_SECTION_COLOR
+end
+local function lighten(c)
+  return {math.min(1,c[1]+0.07),math.min(1,c[2]+0.07),math.min(1,c[3]+0.07)}
+end
 local function color(c) gfx.set(c[1],c[2],c[3],1) end
 local function rect(x,y,w,h,c) color(c); gfx.rect(x,y,w,h,1) end
 local function text(value,x,y,c,width,font)
@@ -220,9 +238,10 @@ local function hit(id,x,y,w,h,action,kind,data,clip)
   end
   if w>0 and h>0 then hits[#hits+1]={id=id,x=x,y=y,w=w,h=h,action=action,kind=kind,data=data} end
 end
-local function button(label,x,y,w,h,action,enabled,id)
+local function button(label,x,y,w,h,action,enabled,id,fill)
   local hover=inside({x=x,y=y,w=w,h=h},gfx.mouse_x,gfx.mouse_y)
-  rect(x,y,w,h,enabled==false and C.panel or hover and C.hover or C.button)
+  local base=fill or C.button
+  rect(x,y,w,h,enabled==false and C.panel or hover and (fill and lighten(base) or C.hover) or base)
   text(label,x+12,y+9,enabled==false and C.muted or C.text,w-20)
   if enabled~=false then hit(id or label,x,y,w,h,action) end
 end
@@ -327,7 +346,7 @@ local function draw_order(y,width)
   for i,card in ipairs(draft.sections) do
     local x=(i-1)*(CARD+GAP)-scroll
     if x+CARD>0 and x<width then
-      rect(x,8,CARD,108,C.button); rect(x,8,CARD,3,C.accent)
+      rect(x,8,CARD,108,C.button); rect(x,8,CARD,3,section_color(card.name))
       text(string.format('%02d',i),x+12,20,C.muted,40)
       local choices=card_variants(card)
       local missing=not exists(dir..'/media/'..draft.settings.cue_lang..'/'..card.name..'.wav')
@@ -434,7 +453,7 @@ local function draw()
         for i,name in ipairs(group.items) do
           local x=24+((i-1)%columns)*(cell+8)
           local y=group_y+28+math.floor((i-1)/columns)*40
-          button(name,x,y,cell,32,function() add_section(name) end,true,'palette:'..name)
+          button(name,x,y,cell,32,function() add_section(name) end,true,'palette:'..name,section_color(name))
           hits[#hits].kind,hits[#hits].data='palette',name
         end
         group_y=group_y+28+math.ceil(#group.items/columns)*40
