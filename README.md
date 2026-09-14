@@ -8,6 +8,10 @@ The Native Editor is the recommended way to use the scripts. It provides a
 graphical song-arrangement editor using REAPER's built-in `gfx` interface and
 rebuilds the project automatically as settings are changed.
 
+## Interface
+
+![AutoTiazinha Native Editor running in REAPER](Interface.png)
+
 ## Requirements
 
 - [REAPER 7.72](https://www.reaper.fm/download.php) or newer is required.
