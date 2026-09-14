@@ -65,6 +65,8 @@ local function save_song_settings(settings)
   reaper.SetProjExtState(0, EXTNAME, "song_structure_text", settings.song_structure_text)
   reaper.SetProjExtState(0, EXTNAME, "click_accent", settings.click_accent)
   reaper.SetProjExtState(0, EXTNAME, "click_beat", settings.click_beat)
+  reaper.SetProjExtState(0, EXTNAME, "pre_song_measures", tostring(settings.pre_song_measures))
+  reaper.SetProjExtState(0, EXTNAME, "loop_enabled", tostring(settings.loop_enabled))
 end
 
 -------------------------
@@ -89,11 +91,32 @@ local function load_song_settings()
       is_double_click = get_proj_ext_value("is_double_click"),
       song_structure_text = get_proj_ext_value("song_structure_text"),
       click_accent = get_proj_ext_value("click_accent"),
-      click_beat = get_proj_ext_value("click_beat")
+      click_beat = get_proj_ext_value("click_beat"),
+      pre_song_measures = tonumber(get_proj_ext_value("pre_song_measures")),
+      loop_enabled = get_proj_ext_value("loop_enabled") or nil
     }
   else
     return false, {nil, nil, nil, nil, nil, nil, nil, nil, nil}
   end
+end
+
+local function start_layout(settings)
+  local measures = tonumber(settings.pre_song_measures)
+  if not measures or measures < 1 or measures > 3 or measures % 1 ~= 0 then
+    error("Pre-song measures must be a whole number from 1 to 3")
+  end
+  if type(settings.loop_enabled) ~= "boolean" then
+    error("Loop enabled must be a boolean")
+  end
+  if settings.loop_enabled then
+    settings.pre_song_measures = 3
+    return {song_start = 4, start_marker = 3, loop_end = 2}
+  end
+  return {
+    song_start = measures + 1,
+    start_marker = 1,
+    half_count_measure = measures >= 2 and measures - 1 or nil,
+  }
 end
 
 
@@ -335,16 +358,35 @@ local function new_position_calculator()
   return calculate_position, invalidate
 end
 
+local function insert_cue(cue_dir, cue_name, measure, beat, calculate_position)
+  local beat_found, position = calculate_position(measure, beat)
+  if not beat_found then return false end
+  reaper.SetEditCurPos(position, false, false)
+  reaper.InsertMedia(cue_dir .. cue_name .. ".wav", 0)
+  return true
+end
+
+local function insert_half_count(settings, measure, calculate_position)
+  local cue_dir = script_dir .. "/media/" .. settings.cue_lang .. "/"
+  insert_cue(cue_dir, "1", measure, 1, calculate_position)
+  -- Count the first bar in half-bar pulses: beats 1 and 3 in 4/4, or beats
+  -- 1 and 4 in 6/8. Fractional beat positions also keep odd meters centered.
+  insert_cue(cue_dir, "2", measure, 1 + settings.time_signature_numerator / 2, calculate_position)
+end
+
 -- looping through song structure and creating regions
-local function generate_song(settings, start, cues_track, calculate_position, invalidate_positions)
+local function generate_song(settings, layout, cues_track, calculate_position, invalidate_positions)
   local idx = 1
-  local next_section_start = start
+  local next_section_start = layout.song_start
   local structure = settings.song_structure
 
   --adding marker to jump to on song start
-  reaper.AddRegionOrMarker(0, false, calculate_position(start-1), 0, "Start", idx, 0)
+  reaper.AddRegionOrMarker(0, false, calculate_position(layout.start_marker), 0, "Start", idx, 0)
 
   reaper.SetOnlyTrackSelected(cues_track)
+  if layout.half_count_measure then
+    insert_half_count(settings, layout.half_count_measure, calculate_position)
+  end
   for _, section in ipairs(structure) do
     next_section_start = create_section(idx, section.name, next_section_start, section.measures, settings, calculate_position, invalidate_positions)
     idx = idx + 1
@@ -434,32 +476,9 @@ create_section = function(idx, section_name, section_start, section_measures, se
 
   local cue_dir = script_dir  .. "/media/" .. cue_lang .. "/"
 
-  local _, cue_position = calculate_position(section_start-1, 1)
-  reaper.SetEditCurPos(cue_position, false, false)
-  reaper.InsertMedia(cue_dir..section_name..".wav", 0)
-
-  local beat_found, position = calculate_position(section_start-1, 2)
-  if beat_found then
-    reaper.SetEditCurPos(position, false, false)
-    reaper.InsertMedia(cue_dir.."2.wav",0)
-  end
-  beat_found, position = calculate_position(section_start-1, 3)
-  if beat_found then
-    reaper.SetEditCurPos(position, false, false)
-    reaper.InsertMedia(cue_dir.."3.wav",0)
-  end
-  beat_found, position = calculate_position(section_start-1, 4)
-  if beat_found then
-    reaper.SetEditCurPos(position, false, false)
-    reaper.InsertMedia(cue_dir.."4.wav",0)
-  end
-  beat_found, position = calculate_position(section_start-1, 5)
-  if beat_found then
-    reaper.SetEditCurPos(position, false, false)
-    reaper.InsertMedia(cue_dir.."5.wav",0)
-    beat_found, position = calculate_position(section_start-1, 6)
-    reaper.SetEditCurPos(position, false, false)
-    reaper.InsertMedia(cue_dir.."6.wav",0)
+  insert_cue(cue_dir, section_name, section_start - 1, 1, calculate_position)
+  for beat = 2, settings.time_signature_numerator do
+    insert_cue(cue_dir, tostring(beat), section_start - 1, beat, calculate_position)
   end
   return section_start+measure_count
 end
@@ -496,8 +515,7 @@ function builder.build(settings)
     if autoCrossState == 1 then
       reaper.Main_OnCommand(40041, 0)
     end
-    local song_start = 4
-
+    local layout = start_layout(settings)
     settings.song_structure = parse_song_structure(settings.song_structure_text)
 
     open_template(settings.song_name)
@@ -519,12 +537,13 @@ function builder.build(settings)
     -- are shared, while create_section invalidates it when a partial-measure
     -- signature changes the map.
     local calculate_position, invalidate_positions = new_position_calculator()
-    local song_ending = generate_song(settings, song_start, cues_track, calculate_position, invalidate_positions)
+    local song_ending = generate_song(settings, layout, cues_track, calculate_position, invalidate_positions)
 
     insert_click(click_track, settings, song_ending+1)
 
-    reaper.GetSet_LoopTimeRange(true, true, 0, calculate_position(song_start-2), false) -- set loop to stop two measures before songstart
-    reaper.GetSetRepeat(1)
+    local loop_end = layout.loop_end and calculate_position(layout.loop_end) or 0
+    reaper.GetSet_LoopTimeRange(true, true, 0, loop_end, false)
+    reaper.GetSetRepeat(settings.loop_enabled and 1 or 0)
 
     reaper.SetEditCurPos(0, true, false)
 

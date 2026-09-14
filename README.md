@@ -50,7 +50,8 @@ Do not load the builder or editor model directly into the Action List.
 1. Open or create a REAPER project and save it in the directory where the song
    projects should live.
 2. Run **autoTiazinhaNativeEditor.lua** from the Action List.
-3. Enter the song name, tempo, time signature, cue language, and click options.
+3. Enter the song name, tempo, time signature, cue language, pre-song timing,
+   and click options.
 4. Add sections from the palette. After adding a section, type its length and
    press Enter. The new section is not built until its length is provided.
 5. Drag section titles to reorder them. Use `-`, `+`, or the length field to
@@ -79,6 +80,26 @@ The builder:
 - configures the loop range and repeat state;
 - adds the end-of-song action marker; and
 - saves the project.
+
+## Pre-song measures and count-in
+
+The **Rhythm & Click** panel has a **Pre-song measures** slider and a **Loop**
+checkbox. With Loop off, the slider selects one to three measures before the
+song:
+
+- **1** uses one full count-in measure; the song begins at measure 2.
+- **2** uses a half-time `1, 2` count followed by the normal section cue and
+  full count; the song begins at measure 3.
+- **3** adds an empty lead-in before those two count measures; the song begins
+  at measure 4 with repeat off.
+
+Enabling **Loop** forces the slider to 3 and restores the standard setup: a
+one-measure loop, an empty measure for smooth seeking, and one full count-in
+measure. Repeat is enabled and the song begins at measure 4.
+
+The half-time count is centered across its measure. In 4/4, `1` and `2` fall on
+beats 1 and 3; in 6/8 they fall on beats 1 and 4, before the following measure
+counts all six beats.
 
 Because markers and tempo markers are rebuilt, first use AutoTiazinha on a copy
 or disposable project if the project already contains manually created markers
