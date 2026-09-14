@@ -496,7 +496,7 @@ function builder.build(settings)
     if autoCrossState == 1 then
       reaper.Main_OnCommand(40041, 0)
     end
-    local song_start = 5
+    local song_start = 4
 
     settings.song_structure = parse_song_structure(settings.song_structure_text)
 
