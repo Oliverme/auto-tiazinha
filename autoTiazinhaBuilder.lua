@@ -9,7 +9,6 @@
 local builder = {}
 local script_path = debug.getinfo(1, "S").source:sub(2)
 local script_dir = script_path:match("^(.*)[/\\]") or "."
-local clear_track, create_section
 
 -- Keep region colors aligned with the editor palette. Numbered cues inherit
 -- their base section's color, and every uncategorized section uses one slate.
@@ -55,7 +54,7 @@ end
 
 local EXTNAME = "AutoTiazinha"
 
-local function save_song_settings(settings)
+local function save_song_settings(settings, pre_song_measures)
   reaper.SetProjExtState(0, EXTNAME, "song_name", settings.song_name)
   reaper.SetProjExtState(0, EXTNAME, "bpm", tostring(settings.bpm))
   reaper.SetProjExtState(0, EXTNAME, "time_signature_numerator", tostring(settings.time_signature_numerator))
@@ -65,7 +64,7 @@ local function save_song_settings(settings)
   reaper.SetProjExtState(0, EXTNAME, "song_structure_text", settings.song_structure_text)
   reaper.SetProjExtState(0, EXTNAME, "click_accent", settings.click_accent)
   reaper.SetProjExtState(0, EXTNAME, "click_beat", settings.click_beat)
-  reaper.SetProjExtState(0, EXTNAME, "pre_song_measures", tostring(settings.pre_song_measures))
+  reaper.SetProjExtState(0, EXTNAME, "pre_song_measures", tostring(pre_song_measures))
   reaper.SetProjExtState(0, EXTNAME, "loop_enabled", tostring(settings.loop_enabled))
 end
 
@@ -109,13 +108,13 @@ local function start_layout(settings)
     error("Loop enabled must be a boolean")
   end
   if settings.loop_enabled then
-    settings.pre_song_measures = 3
-    return {song_start = 4, start_marker = 3, loop_end = 2}
+    return {song_start = 4, start_marker = 3, loop_end = 2, pre_song_measures = 3}
   end
   return {
     song_start = measures + 1,
     start_marker = 1,
     half_count_measure = measures >= 2 and measures - 1 or nil,
+    pre_song_measures = measures,
   }
 end
 
@@ -235,6 +234,14 @@ local function configure_click_item(media_item, chunk, settings, end_time)
   return true
 end
 
+local function clear_track(track)
+  local item_count = reaper.CountTrackMediaItems(track)
+  for i=item_count-1, 0, -1 do
+    local media_item = reaper.GetTrackMediaItem(track, i)
+    reaper.DeleteTrackMediaItem(track, media_item)
+  end
+end
+
 local function insert_click(click, settings, end_time)
   reaper.GetSet_LoopTimeRange(true, false, 0, end_time, false)
   reaper.SetOnlyTrackSelected(click)
@@ -286,14 +293,6 @@ local function get_or_create_track(track_name, clear_existing_items)
   reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", track_name, true)
   reaper.GetSetMediaTrackInfo_String(new_track, "P_EXT:xyz", EXTNAME, true)
   return new_track
-end
-
-clear_track = function(track)
-  local item_count = reaper.CountTrackMediaItems(track)
-  for i=item_count-1, 0, -1 do
-    local media_item = reaper.GetTrackMediaItem(track, i)
-    reaper.DeleteTrackMediaItem(track, media_item)
-  end
 end
 
 local function set_song_bpm_signature(settings)
@@ -374,42 +373,6 @@ local function insert_half_count(settings, measure, calculate_position)
   insert_cue(cue_dir, "2", measure, 1 + settings.time_signature_numerator / 2, calculate_position)
 end
 
--- looping through song structure and creating regions
-local function generate_song(settings, layout, cues_track, calculate_position, invalidate_positions)
-  local idx = 1
-  local next_section_start = layout.song_start
-  local structure = settings.song_structure
-
-  --adding marker to jump to on song start
-  reaper.AddRegionOrMarker(0, false, calculate_position(layout.start_marker), 0, "Start", idx, 0)
-
-  reaper.SetOnlyTrackSelected(cues_track)
-  if layout.half_count_measure then
-    insert_half_count(settings, layout.half_count_measure, calculate_position)
-  end
-  for _, section in ipairs(structure) do
-    next_section_start = create_section(idx, section.name, next_section_start, section.measures, settings, calculate_position, invalidate_positions)
-    idx = idx + 1
-  end
-  local song_ending_time = calculate_position(next_section_start)
-  local reset_cursor_command = 40042
-  local stop_playing_command  = 40044
-  local next_tab_command = 40861
-  reaper.AddRegionOrMarker(0, false, song_ending_time, 0, "! " .. stop_playing_command ..  " " .. reset_cursor_command .. " " .. next_tab_command, idx, 0)
-  return song_ending_time
-end
-
-local function clear_previous_structure()
-  local idx = reaper.GetNumRegionsOrMarkers(0)
-  for i=idx-1, 0, -1 do
-    reaper.DeleteProjectMarkerByIndex(0, i)
-  end
-  idx = reaper.CountTempoTimeSigMarkers(0)
-  for i=idx-1, 0, -1 do
-    reaper.DeleteTempoTimeSigMarker(0, i)
-  end
-end
-
 local function parse_measures(measures_string)
   local parsed = {}
 
@@ -443,7 +406,7 @@ local function parse_measures(measures_string)
   return parsed
 end
 
-create_section = function(idx, section_name, section_start, section_measures, settings, calculate_position, invalidate_positions)
+local function create_section(idx, section_name, section_start, section_measures, settings, calculate_position, invalidate_positions)
   local section_start_time = calculate_position(section_start)
   local measure_count = 0
   local parsedMeasureTable = {}
@@ -483,6 +446,41 @@ create_section = function(idx, section_name, section_start, section_measures, se
   return section_start+measure_count
 end
 
+-- looping through song structure and creating regions
+local function generate_song(settings, structure, layout, cues_track, calculate_position, invalidate_positions)
+  local idx = 1
+  local next_section_start = layout.song_start
+
+  --adding marker to jump to on song start
+  reaper.AddRegionOrMarker(0, false, calculate_position(layout.start_marker), 0, "Start", idx, 0)
+
+  reaper.SetOnlyTrackSelected(cues_track)
+  if layout.half_count_measure then
+    insert_half_count(settings, layout.half_count_measure, calculate_position)
+  end
+  for _, section in ipairs(structure) do
+    next_section_start = create_section(idx, section.name, next_section_start, section.measures, settings, calculate_position, invalidate_positions)
+    idx = idx + 1
+  end
+  local song_ending_time = calculate_position(next_section_start)
+  local reset_cursor_command = 40042
+  local stop_playing_command  = 40044
+  local next_tab_command = 40861
+  reaper.AddRegionOrMarker(0, false, song_ending_time, 0, "! " .. stop_playing_command ..  " " .. reset_cursor_command .. " " .. next_tab_command, idx, 0)
+  return song_ending_time
+end
+
+local function clear_previous_structure()
+  local idx = reaper.GetNumRegionsOrMarkers(0)
+  for i=idx-1, 0, -1 do
+    reaper.DeleteProjectMarkerByIndex(0, i)
+  end
+  idx = reaper.CountTempoTimeSigMarkers(0)
+  for i=idx-1, 0, -1 do
+    reaper.DeleteTempoTimeSigMarker(0, i)
+  end
+end
+
 -- Expose stored settings so each entry point can populate its own interface.
 builder.load_song_settings = load_song_settings
 
@@ -516,10 +514,10 @@ function builder.build(settings)
       reaper.Main_OnCommand(40041, 0)
     end
     local layout = start_layout(settings)
-    settings.song_structure = parse_song_structure(settings.song_structure_text)
+    local structure = parse_song_structure(settings.song_structure_text)
 
     open_template(settings.song_name)
-    save_song_settings(settings)
+    save_song_settings(settings, layout.pre_song_measures)
 
     prevent_ui_refresh()
 
@@ -537,7 +535,7 @@ function builder.build(settings)
     -- are shared, while create_section invalidates it when a partial-measure
     -- signature changes the map.
     local calculate_position, invalidate_positions = new_position_calculator()
-    local song_ending = generate_song(settings, layout, cues_track, calculate_position, invalidate_positions)
+    local song_ending = generate_song(settings, structure, layout, cues_track, calculate_position, invalidate_positions)
 
     insert_click(click_track, settings, song_ending+1)
 

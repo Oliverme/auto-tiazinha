@@ -3,7 +3,7 @@ local M = {}
 local defaults = {
   song_name='Song Name', bpm=120, time_signature_numerator=4,
   time_signature_denominator=4, cue_lang='EN', is_double_click=false,
-  click_accent='', click_beat='', pre_song_measures=3, loop_enabled=true,
+  click_accent='', click_beat='', pre_song_measures=2, loop_enabled=false,
 }
 
 function M.new(saved)

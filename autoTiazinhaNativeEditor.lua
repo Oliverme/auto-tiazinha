@@ -3,11 +3,11 @@
 local dir=debug.getinfo(1,'S').source:sub(2):match('^(.*)[/\\]') or '.'
 local builder=dofile(dir..'/autoTiazinhaBuilder.lua')
 local Model=dofile(dir..'/autoTiazinhaEditorModel.lua')
-local draft,target,target_name,applied,attempted,status
+local draft,target_project,target_name,applied_snapshot,attempted_snapshot,status
 local palette,language={},nil
 local common_sections,other_sections={},{}
 local variants={}
-local cache={}
+local file_exists_cache={}
 local click_sounds={''}
 local scroll,pressed,drag,last_down=0,nil,nil,false
 local hits,strip={},nil
@@ -41,8 +41,8 @@ local function text(value,x,y,c,width,font)
 end
 local function inside(r,x,y) return r and x>=r.x and x<r.x+r.w and y>=r.y and y<r.y+r.h end
 local function exists(path)
-  if cache[path]==nil then cache[path]=reaper.file_exists(path) end
-  return cache[path]
+  if file_exists_cache[path]==nil then file_exists_cache[path]=reaper.file_exists(path) end
+  return file_exists_cache[path]
 end
 local function snapshot()
   local s=Model.settings(draft)
@@ -56,9 +56,9 @@ local function load_project()
   local _,saved=builder.load_song_settings()
   local ok,value=pcall(Model.new,saved)
   if not ok then status=tostring(value); return false end
-  draft=value; target=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target)
-  scroll,language,cache=0,nil,{}
-  applied=snapshot(); attempted=applied; status='UI changes are built automatically.'
+  draft=value; target_project=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target_project)
+  scroll,language,file_exists_cache=0,nil,{}
+  applied_snapshot=snapshot(); attempted_snapshot=applied_snapshot; status='UI changes are built automatically.'
   return true
 end
 local build_song
@@ -68,7 +68,7 @@ local function changed(message)
 end
 local function refresh_palette()
   if language==draft.settings.cue_lang then return end
-  language=draft.settings.cue_lang; palette={}; variants={}; cache={}
+  language=draft.settings.cue_lang; palette={}; variants={}; file_exists_cache={}
   local i=0
   while true do
     local file=reaper.EnumerateFiles(dir..'/media/'..language,i)
@@ -127,26 +127,31 @@ end
 local function minimum_length(card)
   return draft.sections[#draft.sections]==card and 0 or 1
 end
-local function commit_edit()
-  if not editing then return true end
+local function commit_setting_edit()
+  local key=editing.key
+  local value=editing.value
+  local previous=draft.settings[key]
+  if key=='song_name' then
+    if not value:match('%S') or value:find(',') then
+      status='Enter a song name without commas.'
+      return false
+    end
+    draft.settings.song_name=value
+  else
+    local bpm=tonumber(value)
+    if not bpm or bpm<=0 or bpm==math.huge then
+      status='Tempo must be a positive number.'
+      return false
+    end
+    draft.settings.bpm=bpm
+  end
+  editing=nil
+  if draft.settings[key]~=previous then changed('Song settings updated.') end
+  return true
+end
+local function commit_length_edit()
   local value=editing.value
   local number=tonumber(value)
-  if editing.key then
-    local key=editing.key
-    local previous=draft.settings[key]
-    if editing.key=='song_name' then
-      if not value:match('%S') or value:find(',') then
-        status='Enter a song name without commas.'; return false
-      end
-      draft.settings.song_name=value
-    else
-      if not number or number<=0 or number==math.huge then status='Tempo must be a positive number.'; return false end
-      draft.settings.bpm=number
-    end
-    editing=nil
-    if draft.settings[key]~=previous then changed('Song settings updated.') end
-    return true
-  end
   if not value:match('^%d+$') or not number or number<minimum_length(editing.card) or number>=math.maxinteger then
     status='Enter whole bars (zero is allowed only for the final section), or Escape to cancel.'
     return false
@@ -158,24 +163,46 @@ local function commit_edit()
   if card.measures~=previous then changed('Section length updated.') end
   return true
 end
+local function commit_edit()
+  if not editing then return true end
+  if editing.key then return commit_setting_edit() end
+  return commit_length_edit()
+end
+local function decode_key_character(char)
+  local is_unicode=(char>>24)==string.byte('u')
+  if is_unicode then return char&0xFFFFFF,true end
+  return char,false
+end
+local function allowed_edit_character(char,code,is_unicode)
+  if editing.key=='song_name' then
+    return is_unicode or (code>=32 and code<=255)
+  end
+  if char>=48 and char<=57 then return true end
+  return editing.key=='bpm' and char==46
+end
 local function edit_key(char)
   if not editing then return false end
   if char==27 then
     if editing.is_new then Model.remove(draft,editing.card.id) end
-    editing=nil; status='Edit canceled.'; return true
+    editing=nil
+    status='Edit canceled.'
+    return true
   end
-  if char==13 then commit_edit(); return true end
-  if char==1 then editing.selected=true; return true end -- Ctrl+A
+  if char==13 then
+    commit_edit()
+    return true
+  end
+  if char==1 then -- Ctrl+A
+    editing.selected=true
+    return true
+  end
   if char==8 or char==127 then
     local last=utf8.offset(editing.value,-1)
     editing.value=editing.selected and '' or (last and editing.value:sub(1,last-1) or '')
     editing.selected=false
   else
-    local code=char>>24==string.byte('u') and (char&0xFFFFFF) or char
-    local printable=(code>=32 and code<=255) or char>>24==string.byte('u')
-    local allowed=editing.key=='song_name' and printable
-      or (char>=48 and char<=57) or (editing.key=='bpm' and char==46)
-    if allowed then
+    local code,is_unicode=decode_key_character(char)
+    if allowed_edit_character(char,code,is_unicode) then
       editing.value=(editing.selected and '' or editing.value)..utf8.char(code)
       editing.selected=false
     end
@@ -207,27 +234,27 @@ local function add_section(name,position)
   begin_length_edit(card,true)
 end
 build_song=function(force)
-  local current=snapshot()
-  if current==applied then return end
-  if current==attempted and not force then return end
-  if reaper.EnumProjects(-1,'')~=target then status='Switch back to '..target_name..' before building.'; return end
+  local current_snapshot=snapshot()
+  if current_snapshot==applied_snapshot then return end
+  if current_snapshot==attempted_snapshot and not force then return end
+  if reaper.EnumProjects(-1,'')~=target_project then status='Switch back to '..target_name..' before building.'; return end
   local play_state=reaper.GetPlayState()
   if (play_state&4)~=0 then status='Stop recording before building.'; return end
-  cache={}
+  file_exists_cache={}
   local errors=Model.validate(draft,exists,dir..'/media/')
   if #errors>0 then status=errors[1]; return end
-  attempted=current
+  attempted_snapshot=current_snapshot
   local ok,result=pcall(builder.build,Model.settings(draft))
   if ok then
-    target=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target)
-    applied=current; attempted=current; status='Built and saved '..target_name..'.'
+    target_project=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target_project)
+    applied_snapshot=current_snapshot; attempted_snapshot=current_snapshot; status='Built and saved '..target_name..'.'
   else
     status='Build failed; the project may be partly updated.'
     reaper.ShowMessageBox(tostring(result),'AutoTiazinha build error',0)
   end
 end
 local function request_load()
-  if snapshot()~=applied and reaper.ShowMessageBox('Discard unapplied changes and load the active project?','AutoTiazinha',4)~=6 then return end
+  if snapshot()~=applied_snapshot and reaper.ShowMessageBox('Discard unapplied changes and load the active project?','AutoTiazinha',4)~=6 then return end
   load_project()
 end
 -- Hit regions are in window coordinates, including clipped strip controls.
@@ -238,12 +265,12 @@ local function hit(id,x,y,w,h,action,kind,data,clip)
   end
   if w>0 and h>0 then hits[#hits+1]={id=id,x=x,y=y,w=w,h=h,action=action,kind=kind,data=data} end
 end
-local function button(label,x,y,w,h,action,enabled,id,fill)
+local function button(label,x,y,w,h,action,enabled,id,fill,kind,data)
   local hover=inside({x=x,y=y,w=w,h=h},gfx.mouse_x,gfx.mouse_y)
   local base=fill or C.button
   rect(x,y,w,h,enabled==false and C.panel or hover and (fill and lighten(base) or C.hover) or base)
   text(label,x+12,y+9,enabled==false and C.muted or C.text,w-20)
-  if enabled~=false then hit(id or label,x,y,w,h,action) end
+  if enabled~=false then hit(id or label,x,y,w,h,action,kind,data) end
 end
 local function setting_field(key,label,x,y,w)
   text(label,x,y,C.muted,w)
@@ -273,7 +300,7 @@ local function select_setting(key,choices)
     local previous_double=draft.settings.is_double_click
     draft.settings[key]=choices[choice]
     if key=='time_signature_numerator' and choices[choice]~=4 then draft.settings.is_double_click=false end
-    cache={}
+    file_exists_cache={}
     if draft.settings[key]~=previous or draft.settings.is_double_click~=previous_double then changed('Song settings updated.') end
   end
 end
@@ -359,7 +386,7 @@ local function settings_panel(width)
   checkbox('Enabled',loop_x,sy+19,loop_width,s.loop_enabled,true,function()
     s.loop_enabled=not s.loop_enabled
     if s.loop_enabled then s.pre_song_measures=3 end
-    changed(s.loop_enabled and 'Standard lead-in loop enabled.' or 'Lead-in loop disabled.')
+    changed(s.loop_enabled and 'Lead-in loop enabled.' or 'Lead-in loop disabled.')
   end,'loop-enabled')
   text('Accent sound',sx,sy,C.muted,sound_width)
   button(s.click_accent=='' and 'Built-in' or s.click_accent,sx,sy+22,sound_width,30,function() select_setting('click_accent',click_sounds) end,true,'click-accent')
@@ -496,8 +523,7 @@ local function draw()
         for i,name in ipairs(group.items) do
           local x=24+((i-1)%columns)*(cell+8)
           local y=group_y+28+math.floor((i-1)/columns)*40
-          button(name,x,y,cell,32,function() add_section(name) end,true,'palette:'..name,section_color(name))
-          hits[#hits].kind,hits[#hits].data='palette',name
+          button(name,x,y,cell,32,function() add_section(name) end,true,'palette:'..name,section_color(name),'palette',name)
         end
         group_y=group_y+28+math.ceil(#group.items/columns)*40
       end
@@ -511,13 +537,26 @@ local function draw()
   local bars=Model.summary(draft)
   text(#draft.sections..' sections'..(bars and '  /  '..bars..' numbered bars' or ''),24,bottom,C.muted,width)
   local errors=Model.validate(draft,exists,dir..'/media/')
-  local same=reaper.EnumProjects(-1,'')==target
+  local same=reaper.EnumProjects(-1,'')==target_project
   local recording=(reaper.GetPlayState()&4)~=0
-  local pending=snapshot()~=applied
+  local pending=snapshot()~=applied_snapshot
   button('Retry automatic build',24,bottom+32,205,40,function() build_song(true) end,pending and #errors==0 and same and not recording)
   text(pending and 'Waiting to build' or 'Project is up to date',245,bottom+45,C.muted,width-245)
-  local message=not same and ('Switch back to '..target_name..' or load the active project.') or recording and 'Stop recording before building.' or errors[1] or status
-  text(message,24,bottom+86,(not same or recording or #errors>0) and C.warning or C.muted,width)
+  local message,message_color
+  if not same then
+    message='Switch back to '..target_name..' or load the active project.'
+    message_color=C.warning
+  elseif recording then
+    message='Stop recording before building.'
+    message_color=C.warning
+  elseif #errors>0 then
+    message=errors[1]
+    message_color=C.warning
+  else
+    message=status
+    message_color=C.muted
+  end
+  text(message,24,bottom+86,message_color,width)
   if drag and drag.kind~='scrollbar' then
     rect(gfx.mouse_x+12,gfx.mouse_y+16,160,30,C.hover)
     text(drag.kind=='palette' and drag.data or 'Move section',gfx.mouse_x+20,gfx.mouse_y+22,C.text,144)
@@ -569,21 +608,37 @@ local function open_window()
   gfx.init('AutoTiazinha - Song Editor',1151,843,0)
   gfx.setfont(1,'Arial',15); gfx.setfont(2,'Arial',23,string.byte('b'))
 end
+local function editing_has_changes()
+  if not editing then return false end
+  local original
+  if editing.key then
+    original=draft.settings[editing.key]
+  else
+    original=editing.card.measures
+  end
+  return editing.value~=tostring(original)
+end
+local function confirm_close()
+  if snapshot()==applied_snapshot and not editing_has_changes() then return true end
+  return reaper.ShowMessageBox('Discard unapplied changes and close the editor?','AutoTiazinha',4)==6
+end
 local function frame()
   local char=gfx.getchar()
   if char>=0 and edit_key(char) then char=0 end
   if char<0 or char==27 then
-    if (snapshot()~=applied or (editing and editing.value~=tostring(editing.key and draft.settings[editing.key] or editing.card.measures))) and reaper.ShowMessageBox('Discard unapplied changes and close the editor?','AutoTiazinha',4)~=6 then
+    if confirm_close() then
+      closing=true
+    else
       if char<0 then open_window() end
       pressed,drag,last_down=nil,nil,false
-    else closing=true end
+    end
   end
   if closing then gfx.quit(); return end
   local usable=draw()
   if usable then input((gfx.mouse_cap&1)==1) else pressed,drag,last_down=nil,nil,false end
   -- Guarded changes build as soon as the user returns to the target project
   -- or stops recording. Failed builds wait for the explicit retry button.
-  if usable and not editing and not pressed and not drag and snapshot()~=applied and snapshot()~=attempted then build_song() end
+  if usable and not editing and not pressed and not drag and snapshot()~=applied_snapshot and snapshot()~=attempted_snapshot then build_song() end
   gfx.mouse_wheel,gfx.mouse_hwheel=0,0
   gfx.update(); reaper.defer(frame)
 end

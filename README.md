@@ -89,7 +89,7 @@ The builder:
 
 The **Rhythm & Click** panel has a **Pre-song measures** slider and a **Loop**
 checkbox. With Loop off, the slider selects one to three measures before the
-song:
+song. New songs start with **2** pre-song measures and Loop off:
 
 - **1** uses one full count-in measure; the song begins at measure 2.
 - **2** uses a half-time `1, 2` count followed by the normal section cue and
@@ -97,7 +97,7 @@ song:
 - **3** adds an empty lead-in before those two count measures; the song begins
   at measure 4 with repeat off.
 
-Enabling **Loop** forces the slider to 3 and restores the standard setup: a
+Enabling **Loop** forces the slider to 3 and uses the looped setup: a
 one-measure loop, an empty measure for smooth seeking, and one full count-in
 measure. Repeat is enabled and the song begins at measure 4.
 
