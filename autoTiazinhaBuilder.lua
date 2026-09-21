@@ -122,10 +122,17 @@ end
 local function open_template(song_name)
   song_name = song_name:gsub('[<>:"/\\|?*]', "_")
   local project_name = reaper.GetProjectName(0):gsub("%.RPP$", "")
-  local project_directory = reaper.GetProjectPath().."/"
+  -- GetProjectPath is the recording path, which can include the project's
+  -- Media subfolder. Use the saved project's filename to locate its directory.
+  local _, project_filename = reaper.EnumProjects(-1)
+  local project_directory = project_filename and project_filename:match("^(.*)[/\\]")
+  if not project_directory then
+    -- An unsaved project has no filename yet; retain REAPER's default path.
+    project_directory = reaper.GetProjectPath()
+  end
   if song_name ~= project_name then
     reaper.Main_OnCommand(40859, 0) -- new project tab command
-    reaper.Main_SaveProjectEx(0, project_directory..song_name..".RPP", 8) -- save
+    reaper.Main_SaveProjectEx(0, project_directory.."/"..song_name..".RPP", 8) -- save
   end
   if reaper.GetToggleCommandState(40390)==0  then
     reaper.Main_OnCommand(40390, 0) -- toggle smooth seek on
