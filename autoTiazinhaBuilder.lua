@@ -3,9 +3,9 @@
 -- Usage: local builder = dofile(path_to_builder)
 --        local found, settings = builder.load_song_settings()
 --        builder.build(settings)
--- build accepts the same settings table as the original dialog, including
--- song_structure_text. It retains project creation, regeneration, loop setup,
--- and saving behavior. It returns the song ending position in seconds.
+-- build accepts song settings including song_structure_text. It creates a
+-- fixed two-measure count-in, regenerates the song structure, disables repeat,
+-- clears the project loop range, and saves. It returns the ending position.
 local builder = {}
 local script_path = debug.getinfo(1, "S").source:sub(2)
 local script_dir = script_path:match("^(.*)[/\\]") or "."
@@ -53,8 +53,12 @@ local function parse_song_structure(text)
 end
 
 local EXTNAME = "AutoTiazinha"
+local VALID_ROOT_NOTES = {
+  C=true, Db=true, D=true, Eb=true, E=true, F=true,
+  Gb=true, G=true, Ab=true, A=true, Bb=true, B=true,
+}
 
-local function save_song_settings(settings, pre_song_measures)
+local function save_song_settings(settings)
   reaper.SetProjExtState(0, EXTNAME, "song_name", settings.song_name)
   reaper.SetProjExtState(0, EXTNAME, "bpm", tostring(settings.bpm))
   reaper.SetProjExtState(0, EXTNAME, "time_signature_numerator", tostring(settings.time_signature_numerator))
@@ -64,8 +68,7 @@ local function save_song_settings(settings, pre_song_measures)
   reaper.SetProjExtState(0, EXTNAME, "song_structure_text", settings.song_structure_text)
   reaper.SetProjExtState(0, EXTNAME, "click_accent", settings.click_accent)
   reaper.SetProjExtState(0, EXTNAME, "click_beat", settings.click_beat)
-  reaper.SetProjExtState(0, EXTNAME, "pre_song_measures", tostring(pre_song_measures))
-  reaper.SetProjExtState(0, EXTNAME, "loop_enabled", tostring(settings.loop_enabled))
+  reaper.SetProjExtState(0, EXTNAME, "root_note", settings.root_note)
 end
 
 -------------------------
@@ -91,31 +94,15 @@ local function load_song_settings()
       song_structure_text = get_proj_ext_value("song_structure_text"),
       click_accent = get_proj_ext_value("click_accent"),
       click_beat = get_proj_ext_value("click_beat"),
-      pre_song_measures = tonumber(get_proj_ext_value("pre_song_measures")),
-      loop_enabled = get_proj_ext_value("loop_enabled") or nil
+      root_note = get_proj_ext_value("root_note")
     }
   else
     return false, {nil, nil, nil, nil, nil, nil, nil, nil, nil}
   end
 end
 
-local function start_layout(settings)
-  local measures = tonumber(settings.pre_song_measures)
-  if not measures or measures < 1 or measures > 3 or measures % 1 ~= 0 then
-    error("Pre-song measures must be a whole number from 1 to 3")
-  end
-  if type(settings.loop_enabled) ~= "boolean" then
-    error("Loop enabled must be a boolean")
-  end
-  if settings.loop_enabled then
-    return {song_start = 4, start_marker = 3, loop_end = 2, pre_song_measures = 3}
-  end
-  return {
-    song_start = measures + 1,
-    start_marker = 1,
-    half_count_measure = measures >= 2 and measures - 1 or nil,
-    pre_song_measures = measures,
-  }
+local function start_layout()
+  return {song_start = 3, start_marker = 1, half_count_measure = 1}
 end
 
 
@@ -517,14 +504,17 @@ function builder.build(settings)
 
   -- Restore after every build (including errors), even in a persistent GUI.
   local ok, result = xpcall(function()
+    if not settings or not VALID_ROOT_NOTES[settings.root_note] then
+      error("Choose a valid root note.")
+    end
     if autoCrossState == 1 then
       reaper.Main_OnCommand(40041, 0)
     end
-    local layout = start_layout(settings)
+    local layout = start_layout()
     local structure = parse_song_structure(settings.song_structure_text)
 
     open_template(settings.song_name)
-    save_song_settings(settings, layout.pre_song_measures)
+    save_song_settings(settings)
 
     prevent_ui_refresh()
 
@@ -546,9 +536,8 @@ function builder.build(settings)
 
     insert_click(click_track, settings, song_ending+1)
 
-    local loop_end = layout.loop_end and calculate_position(layout.loop_end) or 0
-    reaper.GetSet_LoopTimeRange(true, true, 0, loop_end, false)
-    reaper.GetSetRepeat(settings.loop_enabled and 1 or 0)
+    reaper.GetSet_LoopTimeRange(true, true, 0, 0, false)
+    reaper.GetSetRepeat(0)
 
     reaper.SetEditCurPos(0, true, false)
 

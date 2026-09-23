@@ -1,24 +1,30 @@
 -- UI-independent draft model. The original builder remains the only generator.
 local M = {}
+local root_notes = {'C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'}
+local valid_root_notes = {}
+for _,note in ipairs(root_notes) do valid_root_notes[note]=true end
+M.root_notes = root_notes
+
 local defaults = {
   song_name='', bpm=120, time_signature_numerator=4,
   time_signature_denominator=4, cue_lang='EN', is_double_click=false,
-  click_accent='', click_beat='', pre_song_measures=2, loop_enabled=false,
+  click_accent='', click_beat='', root_note='C',
 }
 
-function M.new(saved)
+function M.new(saved, is_saved_song)
   saved = saved or {}
+  if is_saved_song == nil then
+    is_saved_song = saved.song_name ~= nil and saved.song_name ~= false and saved.song_name ~= ''
+  end
   local draft = {settings={}, sections={}, next_id=1}
   for k,v in pairs(defaults) do
     if saved[k] ~= nil and saved[k] ~= false then v = saved[k] end
     draft.settings[k] = v
   end
   draft.settings.is_double_click = saved.is_double_click == true or saved.is_double_click == 'true'
-  draft.settings.pre_song_measures=tonumber(saved.pre_song_measures) or defaults.pre_song_measures
-  if saved.loop_enabled~=nil then
-    draft.settings.loop_enabled=saved.loop_enabled==true or saved.loop_enabled=='true'
+  if is_saved_song and (saved.root_note == nil or saved.root_note == false or saved.root_note == '') then
+    draft.settings.root_note = nil
   end
-  if draft.settings.loop_enabled then draft.settings.pre_song_measures=3 end
   local structure = saved.song_structure_text
   if structure and structure ~= '' then
     for part in (structure .. '|'):gmatch('(.-)|') do
@@ -111,12 +117,11 @@ function M.validate(draft, exists, media_dir)
   if not tonumber(s.bpm) or s.bpm <= 0 or s.bpm == math.huge then add('BPM must be a positive number.') end
   local num, den = s.time_signature_numerator, s.time_signature_denominator
   if num < 1 or num % 1 ~= 0 or den < 1 or den % 1 ~= 0 then add('Choose a valid time signature.') end
-  local pre_song_measures=tonumber(s.pre_song_measures)
-  if not pre_song_measures or pre_song_measures < 1 or pre_song_measures > 3 or pre_song_measures % 1 ~= 0 then
-    add('Choose 1 to 3 whole measures before the song.')
+  if s.root_note == nil or s.root_note == '' then
+    add('Choose a root note.')
+  elseif not valid_root_notes[s.root_note] then
+    add('Choose a valid root note.')
   end
-  if type(s.loop_enabled)~='boolean' then add('Choose whether the lead-in should loop.') end
-  if s.loop_enabled and pre_song_measures~=3 then add('The loop setup requires three pre-song measures.') end
   if #draft.sections == 0 then add('Add at least one section.') end
   for i,card in ipairs(draft.sections) do
     local bars,_,half = M.length(card.measures)
@@ -130,7 +135,7 @@ function M.validate(draft, exists, media_dir)
   for beat=2,math.min(num,6) do
     if not exists(media_dir..s.cue_lang..'/'..beat..'.wav') then add('Missing count cue: '..beat..' ('..s.cue_lang..').') end
   end
-  if not s.loop_enabled and pre_song_measures and pre_song_measures>=2 and not exists(media_dir..s.cue_lang..'/1.wav') then
+  if not exists(media_dir..s.cue_lang..'/1.wav') then
     add('Missing count cue: 1 ('..s.cue_lang..').')
   end
   for _,key in ipairs({'click_accent','click_beat'}) do

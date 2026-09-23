@@ -47,14 +47,14 @@ end
 local function snapshot()
   local s=Model.settings(draft)
   local parts={}
-  for _,key in ipairs({'song_name','bpm','time_signature_numerator','time_signature_denominator','cue_lang','is_double_click','click_accent','click_beat','pre_song_measures','loop_enabled','song_structure_text'}) do
+  for _,key in ipairs({'song_name','bpm','time_signature_numerator','time_signature_denominator','cue_lang','is_double_click','click_accent','click_beat','root_note','song_structure_text'}) do
     local v=tostring(s[key]); parts[#parts+1]=#v..':'..v
   end
   return table.concat(parts)
 end
 local function load_project()
-  local _,saved=builder.load_song_settings()
-  local ok,value=pcall(Model.new,saved)
+  local found,saved=builder.load_song_settings()
+  local ok,value=pcall(Model.new,saved,found)
   if not ok then status=tostring(value); return false end
   draft=value; target_project=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target_project)
   scroll,language,file_exists_cache=0,nil,{}
@@ -316,43 +316,17 @@ local function checkbox(label,x,y,w,checked,enabled,action,id)
   text(label,x+29,y+7,enabled and C.text or C.muted,w-29)
   if enabled then hit(id or 'checkbox:'..label,x,y,w,32,action) end
 end
-local function slider_measure_at(data,x)
-  local ratio=(math.max(data.left,math.min(data.right,x))-data.left)/(data.right-data.left)
-  return math.max(1,math.min(3,1+math.floor(ratio*2+0.5)))
-end
-local function set_pre_song_measures(value)
-  if draft.settings.loop_enabled or value==draft.settings.pre_song_measures then return end
-  draft.settings.pre_song_measures=value
-  changed('Pre-song length updated.')
-end
-local function pre_song_slider(x,y,w)
-  local value=draft.settings.pre_song_measures
-  local enabled=not draft.settings.loop_enabled
-  text('Pre-song measures',x,y,C.muted,w)
-  rect(x,y+22,w,30,enabled and C.button or C.panel)
-  local left,right=x+17,x+w-17
-  local center=y+37
-  rect(left,center-2,right-left,4,enabled and C.muted or C.bg)
-  for measure=1,3 do
-    local tick_x=left+(measure-1)*(right-left)/2
-    local selected=measure==value
-    rect(tick_x-7,center-10,14,20,selected and (enabled and C.accent or C.muted) or C.button)
-    text(tostring(measure),tick_x-4,y+29,selected and C.bg or (enabled and C.text or C.muted),10)
-  end
-  if enabled then
-    local data={left=left,right=right}
-    hit('pre-song-slider',x,y+22,w,30,function()
-      set_pre_song_measures(slider_measure_at(data,gfx.mouse_x))
-    end,'setting-slider',data)
-  end
-end
 local function settings_panel(width)
   local s=draft.settings
   -- Song identity stays separate from the timing and click controls.
-  setting_field('song_name','Song name',24,91,width-142)
-  text('Cue language',width-102,91,C.muted,118)
-  button(s.cue_lang,width-102,113,126,30,function() select_setting('cue_lang',{'EN','PT'}) end)
-  -- Keep the count-in label and potentially long click-sample names readable.
+  local cue_x=width-102
+  local root_x=cue_x-156
+  setting_field('song_name','Song name',24,91,root_x-36)
+  text('Root note',root_x,91,C.muted,126)
+  button(s.root_note or 'Choose',root_x,113,126,30,function() select_setting('root_note',Model.root_notes) end,true,'root-note')
+  text('Cue language',cue_x,91,C.muted,118)
+  button(s.cue_lang,cue_x,113,126,30,function() select_setting('cue_lang',{'EN','PT'}) end)
+  -- Keep potentially long click-sample names readable.
   -- Only collapse everything onto one row in genuinely wide windows.
   local wide=width>=1100
   rect(24,155,width,wide and 94 or 156,C.panel)
@@ -374,20 +348,9 @@ local function settings_panel(width)
   checkbox('Double click',mx+138,207,140,s.is_double_click,s.time_signature_numerator==4,function()
     s.is_double_click=not s.is_double_click; changed('Click pattern updated.')
   end)
-  local cx=wide and mx+294 or 36
+  local sx=wide and mx+294 or 36
   local sy=wide and 185 or 247
-  local slider_width=190
-  local loop_x=cx+slider_width+12
-  local loop_width=100
-  local sx=loop_x+loop_width+12
   local sound_width=(width+24-sx-12)/2
-  pre_song_slider(cx,sy,slider_width)
-  text('Loop',loop_x,sy,C.muted,loop_width)
-  checkbox('Enabled',loop_x,sy+19,loop_width,s.loop_enabled,true,function()
-    s.loop_enabled=not s.loop_enabled
-    if s.loop_enabled then s.pre_song_measures=3 end
-    changed(s.loop_enabled and 'Lead-in loop enabled.' or 'Lead-in loop disabled.')
-  end,'loop-enabled')
   text('Accent sound',sx,sy,C.muted,sound_width)
   button(s.click_accent=='' and 'Built-in' or s.click_accent,sx,sy+22,sound_width,30,function() select_setting('click_accent',click_sounds) end,true,'click-accent')
   text('Secondary sound',sx+sound_width+12,sy,C.muted,sound_width)
@@ -580,17 +543,11 @@ local function input(down)
     if drag and drag.kind=='scrollbar' then
       local d=drag.data
       scroll=math.max(0,math.min(d.max,(gfx.mouse_x-d.x-d.thumb/2)/math.max(1,d.w-d.thumb)*d.max))
-    elseif drag and drag.kind=='setting-slider' then
-      if drag.data.original==nil then drag.data.original=draft.settings.pre_song_measures end
-      draft.settings.pre_song_measures=slider_measure_at(drag.data,gfx.mouse_x)
-      status='Release to apply the pre-song length.'
     end
   end
   if not down and last_down and pressed then
     if drag then
-      if drag.kind=='setting-slider' then
-        if draft.settings.pre_song_measures~=drag.data.original then changed('Pre-song length updated.') end
-      elseif drag.kind~='scrollbar' and inside(strip,gfx.mouse_x,gfx.mouse_y) then
+      if drag.kind~='scrollbar' and inside(strip,gfx.mouse_x,gfx.mouse_y) then
         local destination=gap_at(gfx.mouse_x)
         if drag.kind=='card' then
           if Model.move(draft,drag.data,destination) then changed('Sections reordered.') end
