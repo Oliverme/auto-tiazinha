@@ -2,14 +2,16 @@
 
 This plan records the requirements agreed in the Live interview. It is an implementation brief for an AI coding agent, not a claim that the Live player already exists.
 
-**Repository state checked 2026-09-23:** implementation steps 2 and 3 are now in the checkout: songs use a fixed two-measure count-in, and the Native Editor stores a song's default root note. There is still no Live entry point. The builder's SWS action marker remains pending removal in step 10.
+**Repository state checked 2026-09-24:** implementation steps 2–5 are now in the checkout: songs use a fixed two-measure count-in, the Native Editor stores a song's default root note, and Live edits named setlists with song occurrences, root overrides, transitions, one pad project, drag reordering, and confirmed removal. The builder's SWS action marker remains pending removal in step 10.
 
 ## Confirmed decisions
 
 ### Entry point, setlists, and editing
 
 - `Live` becomes the main AutoTiazinha entry point. It provides the setlist creator and performance player.
-- A setlist is named and saved separately from song `.RPP` projects. Different setlists may reference the same song project, and the same `.RPP` may appear more than once in one setlist.
+- A setlist is named and saved separately from song `.RPP` projects. Its displayed name matches its filename. Different setlists may reference the same song project, and the same `.RPP` may appear more than once in one setlist.
+- Setlists are user-chosen `.json` files. Song and pad paths are saved relative to the setlist when possible. New Setlist chooses a distinct file, with no Save As button in Live; the Live screen will offer relinking for missing projects. Each occurrence of a repeated song has its own Live root-note override.
+- Live remembers the last successfully opened or saved setlist path on this computer and starts the New/Open file pickers there on later launches.
 - The Live screen adds an existing `.RPP` to the list and then shows another empty slot for the next song. It supports New Song and Edit Song through the existing Native Editor. A newly created song is added to the current setlist.
 - Setlist edits require an explicit **Save** action. The screen shows unsaved changes.
 - Opening a setlist closes the REAPER project tabs already open, allowing REAPER to prompt for unsaved project changes, then opens the setlist's song projects as tabs. A single user-prepared pad `.RPP` is selected for the setlist and opened as a separate project tab.
@@ -20,7 +22,7 @@ This plan records the requirements agreed in the Live interview. It is an implem
 
 - Every song uses a fixed **two-measure count-in**. Remove the editor's variable pre-song measure and pre-song loop controls and their builder settings. The current two-measure pattern is a half-time `1, 2` measure followed by the first section cue and full count; the song begins at measure 3.
 - Pad playback before count-in provides the waiting state that the old pre-song loop was intended to support.
-- Song key means **root note only**, with no major/minor quality. Store a default root note in the song `.RPP`; Live can save an override in the setlist. Whether duplicate occurrences of one song can have different overrides is open.
+- Song key means **root note only**, with no major/minor quality. Store a default root note in the song `.RPP`; Live can save a separate override for each occurrence in the setlist.
 - New songs default to **C**. Use these twelve root-note spellings: `C`, `Db`, `D`, `Eb`, `E`, `F`, `Gb`, `G`, `Ab`, `A`, `Bb`, and `B`. A saved song with no root note requires an explicit choice before it can be built.
 
 ### Transport and transitions
@@ -53,32 +55,30 @@ This plan records the requirements agreed in the Live interview. It is an implem
 
 - Output choices persist **per computer** across setlists. Click and spoken Cues always share a destination. Music can be assigned to one mono output or a stereo pair. With a 3.5 mm stereo jack, Click/Cues use the left channel and all other song audio is mixed to mono on the right. With a multi-output interface, the user chooses destinations.
 - Live replaces each loaded song's saved hardware routing with the computer's output profile **temporarily**. It must not bake that computer's routing into a song `.RPP`, including when the Native Editor saves that song.
-- The setlist shows each transition mode as a small icon between songs. The lower part of Live shows a compact sequence of the previous section, current section, and next two sections of the active song, plus song time remaining and total song time. These times measure the musical song only; they exclude the two-measure count-in and six-second pad tail.
+- The setlist shows each transition mode as a text menu on the separator between songs. The final song ends the setlist without a transition control. The lower part of Live shows a compact sequence of the previous section, current section, and next two sections of the active song, plus song time remaining and total song time. These times measure the musical song only; they exclude the two-measure count-in and six-second pad tail.
 
 ## Assumptions requiring review
 
 These are planning aids, **not product decisions**:
 
-- A separate structured file could store the named setlist, song paths, key overrides, transition modes, and pad project path. Its extension, schema, path handling, and Save As behavior have not been chosen.
 - REAPER's persistent script state could hold the computer's output profile. The storage mechanism and migration policy have not been chosen.
 - A queued song should be visibly highlighted so the two-press action is understandable. Its exact display and cancellation behavior have not been chosen.
-- Reordering and removing songs may belong in the setlist editor, but neither interaction was specified in the interview.
 - The pad project will need a repeatable convention for track names, item looping, and output routing. Only "one sustained-drone track per root note, named by key" is confirmed.
 
 ## Open questions to resolve before dependent steps
 
-1. **Pad project contract:** What exact root-note spellings must track names use (for example `C#` versus `Db`)? Are there exactly twelve pitch classes? Does the prepared pad `.RPP` already loop its drones, or should Live configure looping? How should Live handle a missing root-note track?
+1. **Pad project contract:** Track names use the same natural/flat spellings as the editor and setlist: `C`, `Db`, `D`, `Eb`, `E`, `F`, `Gb`, `G`, `Ab`, `A`, `Bb`, and `B`; use flats rather than sharps. Still open: are there exactly twelve pitch classes? Does the prepared pad `.RPP` already loop its drones, or should Live configure looping? How should Live handle a missing root-note track?
 2. **Pad transition inside one tab:** Must the outgoing and incoming drone tracks overlap for six seconds, with the incoming track reaching full level after three? What should happen when consecutive songs use the same root note/track? Should a pad start automatically for the next song in automatic transitions, given that the manual Start Pads control is unavailable then?
 3. **Pad output:** Does the pad project's audio use the same mono/stereo music destination in the computer's output profile? Must Live temporarily override the pad project's saved hardware routing too?
 4. **Pad selection:** Is a pad `.RPP` required before a setlist can play, or can a setlist run without pads? What should happen if its pad file is missing?
 5. **Resolved — song root-note default:** New songs start at C; the editor and setlist use the twelve natural/flat spellings listed above. A saved song without a root note requires an explicit choice.
 6. **Practice resume:** How long is the fade-in after resuming a paused song, which song tracks should it affect, and does the pad continue uninterrupted? What happens if a paused position is less than one full measure from the beginning?
 7. **Queue details:** How is a queued target canceled or replaced? What do Next/Previous and list selection do while playback is paused? After one press followed by a natural ending, does the queued target remain selected or clear?
-8. **Setlist edge cases:** What should an automatic or Load Next mode do on the final song, where there is no next entry? What is the intended behavior if a song project appears twice and one occurrence is edited while both tabs are open? Can the two occurrences have different Live root-note overrides?
+8. **Setlist edge cases:** The final song ends the setlist without an outgoing transition. What is the intended behavior if a song project appears twice and one occurrence is edited while both tabs are open? Resolved: duplicate occurrences can have different Live root-note overrides.
 9. **Fade tail and pad control:** Is Start Pads available during the six-second outgoing pad fade, or only once all audio is silent? For Load Next and Wait, can Play start the new count-in during that tail?
-10. **Setlist persistence:** Where should named setlists be saved, how should moved/missing `.RPP` paths be relinked, and should Save As create a distinct setlist? The separate-file decision is confirmed; these details are not.
+10. **Resolved — setlist persistence:** Save named setlists as user-chosen `.json` files, use relative song and pad paths when possible, and create a distinct file through New Setlist. The Live screen will offer relinking for missing projects.
 11. **Test delivery:** The current `.gitignore` excludes `/tests/`. Decide whether implementation tests should become tracked project files or remain local-only checks.
-12. **Setlist list editing:** Should songs be reorderable and removable after being added, and what interaction should the Live screen use for those actions?
+12. **Resolved — setlist list editing:** Drag a song row to reorder occurrences and use its separate Remove control to remove one occurrence immediately. Key overrides and outgoing transitions move with their song occurrence.
 
 ## Ordered implementation steps
 
@@ -109,15 +109,20 @@ Each step should be a reviewable change. A dependency on an open question means 
 
 - **Goal:** Represent multiple named setlists independently of song `.RPP` files.
 - **Dependencies:** Answer open question 10; Step 3 for default versus override semantics.
-- **Expected changes:** Add a Live setlist model and file reader/writer for ordered song occurrences, one pad project path, setlist key overrides, and transition modes. Add explicit Save and dirty-state tracking; address Save As only after open question 10 is resolved. Do not autosave edits.
+- **Expected changes:** Add a Live setlist model and file reader/writer for ordered song occurrences, one pad project path, setlist key overrides, and transition modes. Add explicit Save and dirty-state tracking. Do not autosave edits.
 - **Acceptance criteria:** A setlist round-trips through save and load without changing song files; duplicate paths remain separate occurrences; transition modes and root-note overrides remain attached according to the resolved duplicate-song policy; unsaved edits remain visible until saved or discarded.
 
 ### 5. Build the Live setlist editing screen
 
 - **Goal:** Make Live the entry point for composing a show.
-- **Dependencies:** Step 4; answer open question 12 for ordering and removal behavior.
-- **Expected changes:** Add the Live ReaScript UI with named setlist creation/opening, add `.RPP`, an empty next-song slot, per-transition mode icons, pad `.RPP` selection, root-note override controls, Save, and unsaved-changes display. Add ordering and removal controls after their behavior is resolved.
-- **Acceptance criteria:** A user can assemble and save a named setlist, reopen it with all entries and choices intact, and see the default Stop at End mode on a new transition. The screen supports the same song more than once.
+- **Dependencies:** Step 4; resolved question 12 for ordering and removal behavior.
+- **Expected changes:** Add the Live ReaScript UI with named setlist creation/opening, add `.RPP`, an empty next-song slot, transition menus between songs, pad `.RPP` selection, root-note override controls, Save, and unsaved-changes display. Add ordering and removal controls after their behavior is resolved.
+- **Reviewable slices:**
+  1. **Done:** Add the Live window with one New / Open menu, Save, a read-only view of loaded entries, an unsaved-changes indicator, and a save/discard/cancel guard when leaving a dirty setlist. The chosen filename supplies the setlist name.
+  2. **Done:** Add existing `.RPP` projects to ordered occurrences, including duplicate paths, with an empty next-song slot and per-occurrence missing-project relinking.
+  3. **Done:** Add per-occurrence transition menus between songs, root-note overrides, and shared pad `.RPP` selection.
+  4. **Done:** Drag song rows to reorder occurrences and use a separate Remove control without confirmation. Verified the insertion preview, drag outside the setlist, direct removal, save, and reopen in an isolated REAPER 7.80 instance.
+- **Acceptance criteria:** A user can assemble and save a named setlist, reopen it with all entries and choices intact, and see the default Stop at End mode on a new transition. The screen supports the same song more than once, including reordering and removing individual occurrences.
 
 ### 6. Open and own the project tabs
 

@@ -49,6 +49,25 @@ The Native Editor also loads these files from the same directory:
 
 Do not load the builder or editor model directly into the Action List.
 
+## Live setlist window (in progress)
+
+Load `autoTiazinhaLive.lua` from the Action List. Use **New / Open** to create a
+new setlist file or open an existing one, and **Save** to write changes. A new
+setlist's filename becomes its name. The file pickers remember the location of
+the last successfully opened or saved setlist across Live launches. Use the
+empty **Add song** slot to append an existing `.RPP`; the same project can appear
+more than once. Drag a song by its dotted handle or title to reorder it; use
+**Remove** to take that occurrence out of the setlist without deleting its `.RPP`.
+A missing song shows **Relink** for that occurrence. Each song
+has a **Key** menu showing the root note saved in its `.RPP`, while a chosen
+note overrides only that setlist occurrence. Songs without a saved key show
+**Choose**. A text menu between songs sets the transition; the final song ends
+the setlist without a transition control.
+Choose one shared pad `.RPP` in the separate Pad Project box. Save writes these
+edits, and Live prompts before discarding them.
+Opening a setlist currently does not open its projects or start playback in
+REAPER.
+
 ## Quick start
 
 1. Open or create a REAPER project and save it in the directory where the song
