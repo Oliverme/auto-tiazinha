@@ -106,7 +106,7 @@ local function start_layout()
 end
 
 
-local function open_template(song_name)
+local function open_template(song_name, output_directory)
   song_name = song_name:gsub('[<>:"/\\|?*]', "_")
   local project_name = reaper.GetProjectName(0):gsub("%.RPP$", "")
   -- GetProjectPath is the recording path, which can include the project's
@@ -117,9 +117,12 @@ local function open_template(song_name)
     -- An unsaved project has no filename yet; retain REAPER's default path.
     project_directory = reaper.GetProjectPath()
   end
+  project_directory = output_directory or project_directory
   if song_name ~= project_name then
+    local destination=project_directory.."/"..song_name..".RPP"
+    if reaper.file_exists(destination) then error('Song project already exists: '..destination) end
     reaper.Main_OnCommand(40859, 0) -- new project tab command
-    reaper.Main_SaveProjectEx(0, project_directory.."/"..song_name..".RPP", 8) -- save
+    reaper.Main_SaveProjectEx(0, destination, 8) -- save
   end
   if reaper.GetToggleCommandState(40390)==0  then
     reaper.Main_OnCommand(40390, 0) -- toggle smooth seek on
@@ -425,7 +428,7 @@ local function create_section(idx, section_name, section_start, section_measures
     end
   end
   local section_end_time = calculate_position(section_start+measure_count)
-  -- A zero-bar final section is a cue only. The end action marker below
+  -- A zero-bar final section is a cue only. The end marker below
   -- generation lands at its start; do not create an empty region.
   if measure_count>0 then
     reaper.AddRegionOrMarker(0, true, section_start_time, section_end_time, section_name, idx, section_region_color(section_name))
@@ -457,10 +460,7 @@ local function generate_song(settings, structure, layout, cues_track, calculate_
     idx = idx + 1
   end
   local song_ending_time = calculate_position(next_section_start)
-  local reset_cursor_command = 40042
-  local stop_playing_command  = 40044
-  local next_tab_command = 40861
-  reaper.AddRegionOrMarker(0, false, song_ending_time, 0, "! " .. stop_playing_command ..  " " .. reset_cursor_command .. " " .. next_tab_command, idx, 0)
+  reaper.AddRegionOrMarker(0, false, song_ending_time, 0, "AutoTiazinha End", idx, 0)
   return song_ending_time
 end
 
@@ -478,7 +478,7 @@ end
 -- Expose stored settings so each entry point can populate its own interface.
 builder.load_song_settings = load_song_settings
 
-function builder.build(settings)
+function builder.build(settings, output_directory)
   local autoCrossState = reaper.GetToggleCommandState(40041)
   local ui_refresh_prevented = false
 
@@ -513,7 +513,7 @@ function builder.build(settings)
     local layout = start_layout()
     local structure = parse_song_structure(settings.song_structure_text)
 
-    open_template(settings.song_name)
+    open_template(settings.song_name, output_directory)
     save_song_settings(settings)
 
     prevent_ui_refresh()

@@ -3,7 +3,10 @@
 local dir=debug.getinfo(1,'S').source:sub(2):match('^(.*)[/\\]') or '.'
 local builder=dofile(dir..'/autoTiazinhaBuilder.lua')
 local Model=dofile(dir..'/autoTiazinhaEditorModel.lua')
+local LiveBridge=dofile(dir..'/autoTiazinhaLiveEditorBridge.lua')
+local live_context=LiveBridge.take(reaper)
 local draft,target_project,target_name,applied_snapshot,attempted_snapshot,status
+local built_in_session=false
 local palette,language={},nil
 local common_sections,other_sections={},{}
 local variants={}
@@ -244,9 +247,11 @@ build_song=function(force)
   local errors=Model.validate(draft,exists,dir..'/media/')
   if #errors>0 then status=errors[1]; return end
   attempted_snapshot=current_snapshot
-  local ok,result=pcall(builder.build,Model.settings(draft))
+  local output_directory=live_context and live_context.mode=='new' and live_context.directory or nil
+  local ok,result=pcall(builder.build,Model.settings(draft),output_directory)
   if ok then
     target_project=reaper.EnumProjects(-1,''); target_name=reaper.GetProjectName(target_project)
+    built_in_session=true
     applied_snapshot=current_snapshot; attempted_snapshot=current_snapshot; status='Built and saved '..target_name..'.'
   else
     status='Build failed; the project may be partly updated.'
@@ -254,6 +259,7 @@ build_song=function(force)
   end
 end
 local function request_load()
+  if live_context then status='Close this editor before loading another project.'; return end
   if snapshot()~=applied_snapshot and reaper.ShowMessageBox('Discard unapplied changes and load the active project?','AutoTiazinha',4)~=6 then return end
   load_project()
 end
@@ -599,6 +605,19 @@ local function frame()
   gfx.mouse_wheel,gfx.mouse_hwheel=0,0
   gfx.update(); reaper.defer(frame)
 end
+local function target_path()
+  local index=0
+  while true do
+    local project,path=reaper.EnumProjects(index,'')
+    if not project then return '' end
+    if project==target_project then return path or '' end
+    index=index+1
+  end
+end
+reaper.atexit(function()
+  if live_context then LiveBridge.finish(live_context,target_path(),built_in_session) end
+  gfx.quit()
+end)
 if not load_project() then reaper.ShowMessageBox(status,'AutoTiazinha',0); return end
 do
   local i=0
@@ -612,5 +631,4 @@ do
   table.sort(click_sounds)
 end
 open_window()
-reaper.atexit(function() gfx.quit() end)
 reaper.defer(frame)

@@ -2,7 +2,7 @@
 
 This plan records the requirements agreed in the Live interview. It is an implementation brief for an AI coding agent, not a claim that the Live player already exists.
 
-**Repository state checked 2026-09-24:** implementation steps 2–5 are now in the checkout: songs use a fixed two-measure count-in, the Native Editor stores a song's default root note, and Live edits named setlists with song occurrences, root overrides, transitions, one pad project, drag reordering, and confirmed removal. The builder's SWS action marker remains pending removal in step 10.
+**Repository state checked 2026-09-24:** implementation steps 2–11 are now in the checkout: songs use a fixed two-measure count-in and a plain end marker, the Native Editor stores a song's default root note, and Live edits named setlists, loads their song and pad project tabs, launches the Native Editor for new or selected songs, applies a temporary computer output profile, owns basic transport and stopped-state navigation, detects song ends and measure boundaries, and applies natural end modes. Pad playback and fades remain for later steps.
 
 ## Confirmed decisions
 
@@ -14,7 +14,7 @@ This plan records the requirements agreed in the Live interview. It is an implem
 - Live remembers the last successfully opened or saved setlist path on this computer and starts the New/Open file pickers there on later launches.
 - The Live screen adds an existing `.RPP` to the list and then shows another empty slot for the next song. It supports New Song and Edit Song through the existing Native Editor. A newly created song is added to the current setlist.
 - Setlist edits require an explicit **Save** action. The screen shows unsaved changes.
-- Opening a setlist closes the REAPER project tabs already open, allowing REAPER to prompt for unsaved project changes, then opens the setlist's song projects as tabs. A single user-prepared pad `.RPP` is selected for the setlist and opened as a separate project tab.
+- Opening a setlist asks Save or Cancel for each unsaved REAPER project before closing any tabs. After saves succeed, Live closes the tabs through REAPER's normal close action and opens the setlist's song projects as tabs. A single user-prepared pad `.RPP` is selected for the setlist and opened as a separate project tab.
 - Song tempo, sections, click settings, and default root note belong to the song `.RPP`. Transition mode, eventual gap, pad project selection, and per-song root-note overrides belong to the setlist. A Live root-note override leaves the song's default unchanged.
 - There is no requirement to preserve older pre-song settings or their interface. Prefer the clean fixed-count-in design.
 
@@ -53,7 +53,7 @@ This plan records the requirements agreed in the Live interview. It is an implem
 
 ### Outputs and performance display
 
-- Output choices persist **per computer** across setlists. Click and spoken Cues always share a destination. Music can be assigned to one mono output or a stereo pair. With a 3.5 mm stereo jack, Click/Cues use the left channel and all other song audio is mixed to mono on the right. With a multi-output interface, the user chooses destinations.
+- Output choices persist **per computer** across setlists. REAPER selects the audio device; Live selects channels on that device directly. Click and spoken Cues always share a mono destination. Music can be assigned to one mono output or an odd/even stereo pair (Outs 1/2, 3/4, etc.). The default sends Click/Cues left and mono music right on a 3.5 mm stereo jack; a multi-output interface offers more channel choices.
 - Live replaces each loaded song's saved hardware routing with the computer's output profile **temporarily**. It must not bake that computer's routing into a song `.RPP`, including when the Native Editor saves that song.
 - The setlist shows each transition mode as a text menu on the separator between songs. The final song ends the setlist without a transition control. The lower part of Live shows a compact sequence of the previous section, current section, and next two sections of the active song, plus song time remaining and total song time. These times measure the musical song only; they exclude the two-measure count-in and six-second pad tail.
 
@@ -69,12 +69,12 @@ These are planning aids, **not product decisions**:
 
 1. **Pad project contract:** Track names use the same natural/flat spellings as the editor and setlist: `C`, `Db`, `D`, `Eb`, `E`, `F`, `Gb`, `G`, `Ab`, `A`, `Bb`, and `B`; use flats rather than sharps. Still open: are there exactly twelve pitch classes? Does the prepared pad `.RPP` already loop its drones, or should Live configure looping? How should Live handle a missing root-note track?
 2. **Pad transition inside one tab:** Must the outgoing and incoming drone tracks overlap for six seconds, with the incoming track reaching full level after three? What should happen when consecutive songs use the same root note/track? Should a pad start automatically for the next song in automatic transitions, given that the manual Start Pads control is unavailable then?
-3. **Pad output:** Does the pad project's audio use the same mono/stereo music destination in the computer's output profile? Must Live temporarily override the pad project's saved hardware routing too?
-4. **Pad selection:** Is a pad `.RPP` required before a setlist can play, or can a setlist run without pads? What should happen if its pad file is missing?
+3. **Resolved — pad output:** The shared pad project uses the profile's mono/stereo Music destination. Live temporarily overrides its saved hardware routing and restores it afterward.
+4. **Partly resolved — pad selection:** A setlist opens its song tabs without a selected or available pad `.RPP`, with a visible warning. Whether later playback may proceed without pads remains open for Step 13.
 5. **Resolved — song root-note default:** New songs start at C; the editor and setlist use the twelve natural/flat spellings listed above. A saved song without a root note requires an explicit choice.
 6. **Practice resume:** How long is the fade-in after resuming a paused song, which song tracks should it affect, and does the pad continue uninterrupted? What happens if a paused position is less than one full measure from the beginning?
 7. **Queue details:** How is a queued target canceled or replaced? What do Next/Previous and list selection do while playback is paused? After one press followed by a natural ending, does the queued target remain selected or clear?
-8. **Setlist edge cases:** The final song ends the setlist without an outgoing transition. What is the intended behavior if a song project appears twice and one occurrence is edited while both tabs are open? Resolved: duplicate occurrences can have different Live root-note overrides.
+8. **Resolved — setlist edge cases:** Duplicate song occurrences use separate project tabs; unsaved edits in one stay in that tab until saved. Duplicate occurrences can have different Live root-note overrides. The final song ends the setlist without an outgoing transition and always uses Stop at End, including a pad fade-out request.
 9. **Fade tail and pad control:** Is Start Pads available during the six-second outgoing pad fade, or only once all audio is silent? For Load Next and Wait, can Play start the new count-in during that tail?
 10. **Resolved — setlist persistence:** Save named setlists as user-chosen `.json` files, use relative song and pad paths when possible, and create a distinct file through New Setlist. The Live screen will offer relinking for missing projects.
 11. **Test delivery:** The current `.gitignore` excludes `/tests/`. Decide whether implementation tests should become tracked project files or remain local-only checks.
@@ -126,6 +126,7 @@ Each step should be a reviewable change. A dependency on an open question means 
 
 ### 6. Open and own the project tabs
 
+- **Done:** Live loads one tab per song occurrence in setlist order and one shared pad tab when available. Song add, remove, reorder, and relink edits refresh tabs automatically. Missing songs require relinking; a missing or unselected pad produces a warning. Save or Cancel is resolved for every unsaved existing project before any tab closes, so cancellation keeps the previous session open.
 - **Goal:** Match REAPER tabs to the setlist without losing unsaved song work.
 - **Dependencies:** Steps 1, 4, and 5; answer open questions 4 and 8.
 - **Expected changes:** Close existing project tabs through REAPER's normal save prompts; abort loading if the user cancels. Open each song occurrence as a tab and the selected pad `.RPP` as the one shared pad tab. Track the tab associated with every occurrence, including duplicates.
@@ -137,16 +138,19 @@ Each step should be a reviewable change. A dependency on an open question means 
 - **Dependencies:** Steps 3, 5, and 6.
 - **Expected changes:** Launch the existing Native Editor for a new or selected song, add a newly created `.RPP` to the current setlist, and refresh song metadata after an edit.
 - **Acceptance criteria:** New Song creates a song through the editor and adds it once to the current setlist. Edit Song opens the intended occurrence's `.RPP`; changes to song settings are reflected in Live without changing setlist-specific root overrides.
+- **Done:** New Song launches the Native Editor in a blank tab, saves built projects beside the setlist, and appends one song occurrence when the editor closes. Edit Song selects the chosen occurrence's tab, refreshes its metadata, and updates that occurrence's path if the editor changes its filename. Live root-note overrides remain on their original occurrences.
 
 ### 8. Apply the computer's output profile temporarily
 
 - **Goal:** Route Click/Cues and music for the attached audio device while preserving the saved song mix/routing.
 - **Dependencies:** Steps 1 and 6; answer open question 3.
-- **Expected changes:** Add a persistent per-computer output profile and controls for the 3.5 mm split and configurable multi-output assignments. Apply it at setlist load to song tabs, and to the pad tab if confirmed. Restore original project routing when leaving Live or before any editor save that would otherwise capture temporary routing.
-- **Acceptance criteria:** The headphone profile sends Click/Cues left and mono music right; an interface profile supports a separate Click/Cues destination and mono or stereo music destination. Reopening the same song outside Live shows its original saved routing. No individual song track fader positions change.
+- **Expected changes:** Add a persistent per-computer output profile with direct Click/Cues and Music channel selectors. Apply it at setlist load to song tabs and the shared pad tab. Restore original project routing when leaving Live or before any editor save that would otherwise capture temporary routing.
+- **Acceptance criteria:** The default sends Click/Cues left and mono music right on a stereo jack; direct output selectors support a separate Click/Cues destination and mono or stereo Music on an interface. Reopening the same song outside Live shows its original saved routing. No individual song track fader positions change.
+- **Done:** Live defaults to Click/Cues Out 1 and mono Music Out 2, with output selectors tucked into a small bottom-right menu. Stereo choices use odd/even pairs from REAPER's current audio device. Song tabs route Click/Cues separately from the master Music mix; the pad tab uses Music. Live restores saved sends on tab replacement, editor launch, and exit, and repairs a direct REAPER save on its next update. Project faders remain untouched.
 
 ### 9. Add transport and stopped-state navigation
 
+- **Done:** Added a transport section above the setlist with Play/Pause, Full Stop, Previous, and Next. Stopped song selection activates its tab without playback. Practice resume rewinds one measure (clamped to zero near the start) and fades the temporary Music output over one measure; Click/Cues and pads are unaffected. An isolated REAPER 7.80 smoke run verified pause position, rewind, fade completion, restored output routing, and unchanged track fader.
 - **Goal:** Give Live ownership of Play/Pause, Full Stop, tab selection, and practice resume.
 - **Dependencies:** Steps 1, 2, 6, and 8; answer open question 6.
 - **Expected changes:** Implement the top-level controls, playback state tracking, one-measure rewind and fade-in on pause resume, all-tab Full Stop, reset to count-in, and single-action selection while stopped.
@@ -154,6 +158,7 @@ Each step should be a reviewable change. A dependency on an open question means 
 
 ### 10. Give Live sole ownership of song-end events
 
+- **Done:** New builds replace the SWS `!` action marker with a plain `AutoTiazinha End` marker. Live scans loaded song tabs, shows warnings for existing `!` markers or missing end markers, emits a song-end event once per playback, and can schedule one action at the next measure boundary using each song's tempo map. A disposable REAPER 7.80 build and playback verified one marker, no action marker, one boundary callback, and one end event; a local meter-change check covered boundary selection. The SWS global setting is untouched.
 - **Goal:** Detect song ends and measure boundaries without a competing SWS tab advance.
 - **Dependencies:** Steps 1, 2, 6, and 9.
 - **Expected changes:** Remove the builder's SWS `!` marker generation and SWS requirement. Expose the end of each song and the next measure boundary to the Live transport controller. Warn when a loaded song contains an existing `!` action marker without changing SWS's global setting.
@@ -161,6 +166,7 @@ Each step should be a reviewable change. A dependency on an open question means 
 
 ### 11. Implement natural end modes
 
+- **Done:** Live applies the configured natural mode at each song's end marker. Stop at End retains the selected song for replay; Auto starts the next count-in; Load Next and Wait selects the next tab; Hold repeats the final measure with only Click audible through temporary output sends. The final occurrence always stops. End handling emits pad fade/start/hold requests for Step 14; it does not yet play or fade pads. Hold restores the project's prior repeat and loop range when it ends, including around direct REAPER saves.
 - **Goal:** Apply the configured mode when a song reaches its end.
 - **Dependencies:** Steps 4, 6, 9, and 10; answer open question 8.
 - **Expected changes:** Implement default Stop at End, automatic start with zero gap, Load Next and Wait, and a click-only Hold loop. Emit pad start/fade/hold requests for Step 14 without changing song backing-track faders.

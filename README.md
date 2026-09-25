@@ -2,7 +2,7 @@
 
 AutoTiazinha is a set of Lua ReaScripts for preparing songs in REAPER. It builds
 a click track, spoken section cues, count cues, regions, tempo information, and
-an optional end-of-song action that advances to the next project tab.
+a plain end-of-song marker for Live.
 
 The Native Editor is the recommended way to use the scripts. It provides a
 graphical song-arrangement editor using REAPER's built-in `gfx` interface and
@@ -17,10 +17,6 @@ rebuilds the project automatically as settings are changed.
 - [REAPER 7.72](https://www.reaper.fm/download.php) or newer is required.
   The scripts use `reaper.AddRegionOrMarker()`, which was introduced in REAPER
   7.72.
-- [SWS/S&M Extension 2.14.0 #7](https://www.sws-extension.org/) or newer is
-  required only for the end-of-song marker automation that stops playback,
-  returns to the beginning, and selects the next project tab. Song generation
-  itself works without SWS.
 - No separate Lua installation is needed for normal use because REAPER runs the
   scripts. Lua 5.4 is needed only to run the command-line test suite.
 
@@ -55,18 +51,72 @@ Load `autoTiazinhaLive.lua` from the Action List. Use **New / Open** to create a
 new setlist file or open an existing one, and **Save** to write changes. A new
 setlist's filename becomes its name. The file pickers remember the location of
 the last successfully opened or saved setlist across Live launches. Use the
-empty **Add song** slot to append an existing `.RPP`; the same project can appear
-more than once. Drag a song by its dotted handle or title to reorder it; use
+empty **Add .RPP** slot to append an existing project, or **New Song** to create
+one in the Native Editor. New songs are saved beside the setlist and added when
+the editor closes after a successful build. The same project can appear more
+than once. Drag a song by its dotted handle or title to reorder it; use
 **Remove** to take that occurrence out of the setlist without deleting its `.RPP`.
-A missing song shows **Relink** for that occurrence. Each song
+A missing song shows **Relink** for that occurrence. **Edit** opens that
+occurrence's project tab in the Native Editor. Song changes appear in Live when
+the editor closes; changing the song's filename updates that occurrence's path.
+Each song
 has a **Key** menu showing the root note saved in its `.RPP`, while a chosen
 note overrides only that setlist occurrence. Songs without a saved key show
 **Choose**. A text menu between songs sets the transition; the final song ends
 the setlist without a transition control.
-Choose one shared pad `.RPP` in the separate Pad Project box. Save writes these
-edits, and Live prompts before discarding them.
-Opening a setlist currently does not open its projects or start playback in
-REAPER.
+Choose one shared pad `.RPP` in the separate Pad Project box. **Save** writes
+setlist edits, including newly added songs; Live prompts before discarding them.
+Opening a setlist loads its song projects as REAPER tabs in setlist order, with
+one separate shared pad tab. Repeated songs receive separate tabs. Click a song
+row to select its tab while stopped, or use **Load Tabs** to load the current
+setlist if tabs were changed outside Live. Adding, removing, reordering, or
+relinking songs updates the project tabs automatically. A missing song must be
+relinked before tabs load; a missing or unselected pad leaves the song tabs
+available and shows a warning.
+Before replacing existing tabs, Live asks to save each modified project. Cancel
+keeps the previous tabs open. If this cancels a reload after the editor saved a
+song, the setlist keeps that song and **Reload Tabs** can open it later. Loading
+tabs does not start playback.
+
+The transport bar above the setlist has **Play/Pause**, **Full Stop**,
+**Previous**, and **Next**. While stopped, Previous/Next or a song row selects
+that song's tab without playing it. Play starts the selected song at its
+two-measure count-in; Pause holds its position. Resuming rewinds one measure
+(or to the start near the beginning) and fades Music in over one measure for
+practice. Click and Cues stay at full level, and a playing pad is left alone.
+Full Stop stops every playing project tab, including pads, and resets the
+selected song to its count-in. Song switching during playback is planned for a
+later Live step. Practice resume requires an active output profile.
+
+At a natural end, **Stop at End** keeps the song selected so Play replays it.
+**Start Next Automatically** starts the next song's count-in; **Load Next and
+Wait** selects the next tab and waits for Play. **Hold** loops the outgoing
+song's final Click measure while silencing its Music and Cues outputs. Full
+Stop leaves Hold and restores the song's earlier loop and repeat settings.
+The final song always uses Stop at End. Pad start, fade, and hold requests are
+emitted by the transport, but pad playback and fades arrive in later steps.
+Hold requires the active output profile and Click/Cues tracks.
+
+The **Outputs** button at the top right opens hoverable Click/Cues and Music
+submenus. They use REAPER's currently selected audio device; choose the device in
+REAPER's audio preferences. Live does not switch devices.
+By default, Click/Cues use mono **Out 1** (left on a 3.5 mm stereo jack) and
+Music uses mono **Out 2** (right). Choose another Click/Cues output or a mono
+Music output or an odd/even stereo Music pair (Outs 1/2, 3/4, etc.) when using
+a multi-output interface. The menus list REAPER's channel names followed by
+their output numbers. These
+choices persist on this computer across setlists. The shared pad project uses
+the Music output. Live temporarily applies the choices to loaded project tabs
+and restores each project's original routing before an editor save, when tabs
+are replaced, and when Live closes. If a project is saved directly through
+REAPER while Live is open, Live repairs its saved routing on the next update.
+An unavailable output leaves the profile inactive and shows a warning.
+
+**Recommended REAPER setting for Live:** To avoid a loading window opening for
+each song tab, go to **Options > Preferences > Project > Project loading** and
+untick **Show load status and splash while loading projects**. Live still loads
+each project normally; this REAPER preference hides the repeated window for all
+project loads, not only Live.
 
 ## Quick start
 
@@ -100,7 +150,7 @@ The builder:
 - creates one named region for each positive-length section;
 - recreates the project's markers and tempo/time-signature markers;
 - disables repeat and clears the project's loop range;
-- adds the end-of-song action marker; and
+- adds the plain `AutoTiazinha End` marker; and
 - saves the project.
 
 ## Count-in
@@ -131,38 +181,23 @@ a dot for each half-length bar:
 - `4.2` means four full bars, one half bar, then two full bars.
 
 Half bars require an even time-signature numerator. A final section may have a
-length of `0`; this creates its spoken cue and end action without creating an
+length of `0`; this creates its spoken cue and end marker without creating an
 empty region. Only the last section can have zero bars.
 
 To add custom section cues, place matching `.wav` files in both language folders
 as needed. The file name, without `.wav`, becomes the section name. Avoid `|`,
 `:`, commas, slashes, and backslashes in section names.
 
-## Advancing to the next song with SWS
+## Song end markers
 
-AutoTiazinha places an action marker at the end of the song. When SWS marker
-actions are enabled and playback crosses that marker, REAPER stops, returns to
-the beginning, and selects the next project tab. This lets multiple open project
-tabs act as an ordered set list.
-
-To enable it:
-
-1. Install SWS/S&M 2.14.0 #7 or newer for the same architecture as REAPER.
-2. Restart REAPER after installing the extension.
-3. Open the Action List and run **SWS: Enable marker actions**, or enable
-   **Options > Enable SWS marker actions**.
-4. Open the song projects in project tabs in performance order.
-5. Build each song with AutoTiazinha and confirm that its final `!` action marker
-   is present.
-
-Without SWS, or with marker actions disabled, the Click/Cues tracks and song
-regions still work, but crossing the final marker will not advance to the next
-song. See the official [SWS marker-actions documentation](https://www.sws-extension.org/markeractions.php)
-for more information.
-
-Test this automation with disposable projects before using it live. Marker
-actions execute REAPER commands during playback, and the next-tab behavior
-depends on the order of the currently open project tabs.
+New builds place a plain `AutoTiazinha End` marker at the musical song end.
+Live detects that marker and uses the song's tempo map for measure boundaries;
+SWS is not required. Live warns when a loaded song still has a legacy `!`
+action marker, which may make SWS change tabs or stop playback if marker
+actions are enabled. Rebuild that song in the Native Editor to replace the old
+marker. A song without the new end marker also needs a rebuild for Live end
+detection. Live detects ends now; automatic end-mode behavior comes in the next
+implementation step.
 
 ## Troubleshooting
 
@@ -172,8 +207,8 @@ depends on the order of the currently open project tabs.
   language or add the matching recording.
 - **A change says it is waiting to build:** finish the active length/value edit,
   return to the project tab where the editor was opened, or stop recording.
-- **The next song is not selected:** install SWS and enable SWS marker actions,
-  then confirm another project tab exists after the current song.
+- **Live warns about action markers or a missing end marker:** rebuild the
+  affected song in the Native Editor.
 - **A build error occurred:** playback may continue, but the project may be
   partially updated. Fix the reported input or missing media and choose
   **Retry automatic build**.
